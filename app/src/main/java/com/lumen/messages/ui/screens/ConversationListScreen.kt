@@ -64,6 +64,8 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DoneAll
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Sms
 import androidx.compose.material3.Icon
@@ -130,7 +132,8 @@ fun ConversationListScreen(
     val haptic = LocalHapticFeedback.current
     val density = LocalDensity.current
     val backdrop = rememberBackdropState()
-    val listState = rememberLazyListState()
+    // Lives in the view model so the list keeps its scroll position when you come back from a chat.
+    val listState = vm.chatListState
     var headerHeightPx by remember { mutableIntStateOf(0) }
     var searchOpen by remember { mutableStateOf(vm.query.isNotEmpty()) }
     var confirmDelete by remember { mutableStateOf(false) }
@@ -161,6 +164,18 @@ fun ConversationListScreen(
     val hits = if (vm.query.isNotBlank()) vm.searchHits else emptyList()
     val scrolled by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 8 } }
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val scope = rememberCoroutineScope()
+
+    // Tap "Chats" (title or tab) to jump to the top — instantly from far down, smoothly when close.
+    val handledSignal = remember { mutableIntStateOf(vm.scrollTopSignal) }
+    LaunchedEffect(vm.scrollTopSignal) {
+        if (vm.scrollTopSignal != handledSignal.intValue) {
+            handledSignal.intValue = vm.scrollTopSignal
+            if (listState.firstVisibleItemIndex > 15) listState.scrollToItem(0)
+            else listState.animateScrollToItem(0)
+        }
+    }
+    val showTop by remember { derivedStateOf { listState.firstVisibleItemIndex > 6 } }
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
@@ -280,7 +295,16 @@ fun ConversationListScreen(
                     ) {
                         when (m) {
                             HeaderMode.Normal -> Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Chats", style = LType.hero.copy(color = p.text, fontSize = 30.sp), modifier = Modifier.weight(1f))
+                                Box(Modifier.weight(1f)) {
+                                    Text(
+                                        "Chats",
+                                        style = LType.hero.copy(color = p.text, fontSize = 30.sp),
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .clickable(onClick = vm::scrollChatsToTop)
+                                            .padding(horizontal = 2.dp),
+                                    )
+                                }
                                 GlassIconButton(Icons.Rounded.Search, "Search", onClick = { searchOpen = true }, size = 42.dp)
                                 Spacer(Modifier.width(10.dp))
                                 GlassIconButton(Icons.Rounded.DoneAll, "Mark all as read", onClick = vm::markAllRead, size = 42.dp)
@@ -329,6 +353,32 @@ fun ConversationListScreen(
                         vm.filter = it
                     },
                 )
+            }
+        }
+
+        // Back-to-top button appears once you've scrolled down a way.
+        AnimatedVisibility(
+            visible = showTop && mode == HeaderMode.Normal,
+            enter = scaleIn(spring(0.55f, 500f)) + fadeIn(),
+            exit = scaleOut() + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = navBottom + BottomBarSpace + 6.dp),
+        ) {
+            GlassSurface(
+                modifier = Modifier.clip(RoundedCornerShape(20.dp)).clickable(onClick = vm::scrollChatsToTop),
+                shape = RoundedCornerShape(20.dp),
+                backdrop = backdrop,
+                tint = p.tabBar,
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Rounded.KeyboardArrowUp, null, tint = p.text, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Top", style = LType.caption.copy(color = p.text))
+                }
             }
         }
 

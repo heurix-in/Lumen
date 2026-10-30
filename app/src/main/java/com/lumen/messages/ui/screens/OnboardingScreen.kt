@@ -261,73 +261,32 @@ private fun StepRow(
     }
 }
 
-/** Animated logo: two chat bubbles breathing, with light orbiting around them. */
+/** The Lumen logo, floating gently with a breathing glow behind it. */
 @Composable
 fun LumenLogo(modifier: Modifier = Modifier) {
-    val p = LocalPalette.current
     val t = rememberInfiniteTransition(label = "logo")
-    val orbit by t.animateFloat(
-        0f, (2 * PI).toFloat(),
-        infiniteRepeatable(tween(6000, easing = LinearEasing)), label = "orbit",
-    )
     val breathe by t.animateFloat(0f, 1f, infiniteRepeatable(tween(2400), RepeatMode.Reverse), label = "breathe")
-
-    Canvas(modifier) {
-        val w = size.width
-        val h = size.height
-        val c = Offset(w / 2, h / 2)
-
-        // Glow
-        drawCircle(
-            Brush.radialGradient(
-                listOf(p.accentA.copy(alpha = 0.45f + 0.15f * breathe), Color.Transparent),
-                center = c, radius = w * 0.55f,
-            ),
-            radius = w * 0.55f, center = c,
-        )
-        // Orbit ring and comets
-        drawCircle(p.glassEdgeLight.copy(alpha = 0.25f), radius = w * 0.44f, center = c, style = Stroke(1.dp.toPx()))
-        for (i in 0 until 3) {
-            val a = orbit + i * (2 * PI / 3).toFloat()
-            val pos = Offset(c.x + cos(a) * w * 0.44f, c.y + sin(a) * w * 0.44f)
-            drawCircle(listOf(p.accentB, p.accentC, p.success)[i], radius = 3.5.dp.toPx(), center = pos)
-        }
-
-        // Back bubble (gradient)
-        val s = 1f + 0.03f * breathe
-        val bw = w * 0.46f * s
-        val bh = h * 0.34f * s
-        val bTopLeft = Offset(c.x - bw * 0.72f, c.y - bh * 0.78f)
-        drawRoundRect(
-            Brush.linearGradient(listOf(p.accentC, p.accentA, p.accentB), start = bTopLeft, end = bTopLeft + Offset(bw, bh)),
-            topLeft = bTopLeft, size = Size(bw, bh), cornerRadius = CornerRadius(bh * 0.42f),
-        )
-        val tail = Path().apply {
-            moveTo(bTopLeft.x + bw * 0.18f, bTopLeft.y + bh * 0.9f)
-            lineTo(bTopLeft.x + bw * 0.08f, bTopLeft.y + bh * 1.22f)
-            lineTo(bTopLeft.x + bw * 0.42f, bTopLeft.y + bh * 0.95f)
-            close()
-        }
-        drawPath(tail, p.accentA)
-
-        // Front bubble (glass)
-        val fw = w * 0.40f
-        val fh = h * 0.30f
-        val fTopLeft = Offset(c.x - fw * 0.15f, c.y - fh * 0.05f)
-        drawRoundRect(Color.White.copy(alpha = 0.28f), topLeft = fTopLeft, size = Size(fw, fh), cornerRadius = CornerRadius(fh * 0.45f))
-        drawRoundRect(
-            Color.White.copy(alpha = 0.75f), topLeft = fTopLeft, size = Size(fw, fh),
-            cornerRadius = CornerRadius(fh * 0.45f), style = Stroke(1.5.dp.toPx()),
-        )
-        // Typing dots
-        for (i in 0 until 3) {
-            val phase = ((orbit * 1.5f) - i * 0.7f)
-            val lift = (sin(phase) * 0.5f + 0.5f) * fh * 0.10f
+    val float by t.animateFloat(-1f, 1f, infiniteRepeatable(tween(3200), RepeatMode.Reverse), label = "float")
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
             drawCircle(
-                Color.White,
-                radius = fh * 0.075f,
-                center = Offset(fTopLeft.x + fw * (0.30f + i * 0.20f), fTopLeft.y + fh * 0.5f - lift),
+                Brush.radialGradient(
+                    listOf(Color(0xFF14C8FF).copy(alpha = 0.30f + 0.15f * breathe), Color.Transparent),
+                    center = center, radius = size.minDimension * 0.55f,
+                ),
+                radius = size.minDimension * 0.55f,
             )
         }
+        androidx.compose.foundation.Image(
+            painter = androidx.compose.ui.res.painterResource(com.lumen.messages.R.drawable.lumen_logo),
+            contentDescription = "Lumen",
+            modifier = Modifier
+                .fillMaxSize(0.62f)
+                .graphicsLayer {
+                    translationY = float * 6.dp.toPx()
+                    val s = 1f + 0.02f * breathe
+                    scaleX = s; scaleY = s
+                },
+        )
     }
 }

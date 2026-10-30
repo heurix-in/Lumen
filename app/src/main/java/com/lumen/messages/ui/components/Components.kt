@@ -49,6 +49,21 @@ import com.lumen.messages.ui.theme.LocalPalette
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.lerp
+import com.lumen.messages.data.AvatarStyle
+import com.lumen.messages.ui.theme.LocalLook
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 /** Springy shrink while pressed — used on every tappable surface. */
 fun Modifier.pressScale(interaction: MutableInteractionSource, pressed: Float = 0.96f): Modifier = composed {
@@ -108,8 +123,28 @@ private fun initialsOf(name: String?, address: String): String? {
     }
 }
 
+/** Shared clock (0..1, looping) that drives every animated avatar from a single animation. */
+val LocalAvatarClock = staticCompositionLocalOf<State<Float>> { mutableFloatStateOf(0f) }
+
+private val vividPairs = listOf(
+    Color(0xFF3A7BFF) to Color(0xFF14D2FF),
+    Color(0xFFFF7A59) to Color(0xFFFFC56B),
+    Color(0xFF8F5BFF) to Color(0xFFFF6FD8),
+    Color(0xFF18C29C) to Color(0xFF8BF5C9),
+    Color(0xFFFF4F7B) to Color(0xFFFF9F5A),
+    Color(0xFF4F6BFF) to Color(0xFFA06BFF),
+    Color(0xFFFFB800) to Color(0xFFFF6A3D),
+    Color(0xFF00B4D8) to Color(0xFF90E0EF),
+)
+
+private val animalEmoji = listOf(
+    "🦊", "🐼", "🐨", "🐯", "🦁", "🐸", "🐵", "🐧", "🦉", "🐙",
+    "🦄", "🐳", "🐝", "🦋", "🐢", "🐰", "🐻", "🐶", "🐱", "🦜",
+)
+
 /**
- * Contact avatar: photo, initials on a gradient, or a person glyph.
+ * Contact avatar: photo if the contact has one, otherwise the style chosen in Settings
+ * (animated orb, animated shapes, bobbing emoji, letters, or a plain silhouette).
  * When [selected] it flips over in 3D to reveal a check mark.
  */
 @Composable
@@ -123,9 +158,15 @@ fun Avatar(
     shape: Shape = CircleShape,
 ) {
     val p = LocalPalette.current
+    val look = LocalLook.current
+    val clock = LocalAvatarClock.current
     val photo = rememberContactPhoto(photoUri)
-    val gradient = remember(address) { avatarGradients[abs(address.hashCode()) % avatarGradients.size] }
+    val seed = remember(address) { abs(address.hashCode()) }
+    val gradient = remember(address) { avatarGradients[seed % avatarGradients.size] }
+    val vivid = remember(address) { vividPairs[seed % vividPairs.size] }
     val initials = remember(name, address) { initialsOf(name, address) }
+    val phase = (seed % 1000) / 1000f
+    val sizeDp = size
     val flip by animateFloatAsState(
         targetValue = if (selected) 180f else 0f,
         animationSpec = spring(dampingRatio = 0.62f, stiffness = 380f),
@@ -142,13 +183,7 @@ fun Avatar(
         contentAlignment = Alignment.Center,
     ) {
         if (flip <= 90f) {
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .clip(shape)
-                    .background(Brush.linearGradient(gradient)),
-                contentAlignment = Alignment.Center,
-            ) {
+            Box(Modifier.fillMaxSize().clip(shape), contentAlignment = Alignment.Center) {
                 when {
                     photo != null -> Image(
                         bitmap = photo,
@@ -156,19 +191,86 @@ fun Avatar(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
                     )
-                    initials != null -> Text(
-                        initials,
-                        style = TextStyle(
-                            color = Color.White,
-                            fontSize = (size.value * 0.38f).sp,
-                            fontWeight = FontWeight.SemiBold,
-                        ),
+                    look.avatarStyle == AvatarStyle.Orb -> Box(
+                        Modifier.fillMaxSize().drawBehind {
+                            val a = (2 * PI * (clock.value + phase)).toFloat()
+                            val r = this.size.minDimension / 2f
+                            val c = center
+                            val dir = Offset(cos(a), sin(a)) * r
+                            drawRect(Brush.linearGradient(listOf(vivid.first, vivid.second), start = c - dir, end = c + dir))
+                            val light = c + Offset(cos(a + 1f), sin(a * 1.3f)) * (r * 0.45f)
+                            drawCircle(
+                                Brush.radialGradient(listOf(Color.White.copy(alpha = 0.55f), Color.Transparent), center = light, radius = r * 0.95f),
+                                radius = r * 0.95f, center = light,
+                            )
+                            drawOval(
+                                Color.White.copy(alpha = 0.16f),
+                                topLeft = Offset(this.size.width * 0.2f, this.size.height * 0.07f),
+                                size = Size(this.size.width * 0.6f, this.size.height * 0.3f),
+                            )
+                        }
                     )
-                    else -> Icon(
-                        Icons.Rounded.Person, null,
-                        tint = Color.White,
-                        modifier = Modifier.size(size * 0.55f),
+                    look.avatarStyle == AvatarStyle.Shapes -> Box(
+                        Modifier.fillMaxSize().drawBehind {
+                            val t = clock.value + phase
+                            val w = this.size.width
+                            drawRect(lerp(vivid.first, Color.Black, 0.35f))
+                            rotate(degrees = 360f * t, pivot = Offset(w * 0.35f, w * 0.38f)) {
+                                drawRoundRect(
+                                    vivid.second,
+                                    topLeft = Offset(w * 0.12f, w * 0.15f),
+                                    size = Size(w * 0.46f, w * 0.46f),
+                                    cornerRadius = CornerRadius(w * 0.12f),
+                                )
+                            }
+                            val orbit = (2 * PI * t).toFloat()
+                            drawCircle(
+                                vivid.first,
+                                radius = w * 0.24f,
+                                center = Offset(w * (0.62f + 0.06f * cos(orbit)), w * (0.62f + 0.06f * sin(orbit))),
+                            )
+                            rotate(degrees = -240f * t, pivot = Offset(w * 0.7f, w * 0.3f)) {
+                                val tri = Path().apply {
+                                    moveTo(w * 0.7f, w * 0.12f)
+                                    lineTo(w * 0.86f, w * 0.42f)
+                                    lineTo(w * 0.54f, w * 0.42f)
+                                    close()
+                                }
+                                drawPath(tri, Color.White.copy(alpha = 0.85f))
+                            }
+                        }
                     )
+                    look.avatarStyle == AvatarStyle.Emoji -> Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(Brush.linearGradient(listOf(vivid.first.copy(alpha = 0.55f), vivid.second.copy(alpha = 0.35f)))),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            animalEmoji[seed % animalEmoji.size],
+                            style = TextStyle(fontSize = (size.value * 0.5f).sp),
+                            modifier = Modifier.graphicsLayer {
+                                val a = (2 * PI * (clock.value * 2f + phase)).toFloat()
+                                translationY = sin(a) * sizeDp.toPx() * 0.05f
+                                rotationZ = sin(a + 0.8f) * 7f
+                            },
+                        )
+                    }
+                    look.avatarStyle == AvatarStyle.Initials && initials != null -> Box(
+                        Modifier.fillMaxSize().background(Brush.linearGradient(gradient)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            initials,
+                            style = TextStyle(color = Color.White, fontSize = (size.value * 0.38f).sp, fontWeight = FontWeight.SemiBold),
+                        )
+                    }
+                    else -> Box(
+                        Modifier.fillMaxSize().background(Brush.linearGradient(gradient)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Rounded.Person, null, tint = Color.White, modifier = Modifier.size(size * 0.55f))
+                    }
                 }
             }
         } else {

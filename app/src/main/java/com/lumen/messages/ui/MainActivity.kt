@@ -16,6 +16,16 @@ import androidx.activity.SystemBarStyle
 import android.graphics.Color as AndroidColor
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.LinearEasing
+import com.lumen.messages.data.AvatarStyle
+import com.lumen.messages.ui.components.LocalAvatarClock
 import com.lumen.messages.data.ThemeMode
 import com.lumen.messages.ui.screens.MoneyScreen
 import com.lumen.messages.ui.screens.SettingsScreen
@@ -69,7 +79,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val systemDark = isSystemInDarkTheme()
             val surface = surfaceFor(vm.prefs.themeMode, systemDark)
-            val dark = surface != LumenSurface.White
+            val dark = surface != LumenSurface.White && surface != LumenSurface.Paper
             // Status-bar icons must contrast with the chosen screen colour, not the system one.
             DisposableEffect(dark) {
                 val style = if (dark) SystemBarStyle.dark(AndroidColor.TRANSPARENT)
@@ -78,7 +88,22 @@ class MainActivity : ComponentActivity() {
                 onDispose { }
             }
             LumenTheme(vm.prefs, surface) {
-                LumenRoot(vm)
+                // One shared animation drives all animated avatars (cheap: read only while drawing).
+                val animated = vm.prefs.avatarStyle != AvatarStyle.Initials &&
+                    vm.prefs.avatarStyle != AvatarStyle.Glyph && !vm.prefs.reduceMotion
+                val clock: State<Float> = if (animated) {
+                    rememberInfiniteTransition(label = "avatars").animateFloat(
+                        initialValue = 0f,
+                        targetValue = 1f,
+                        animationSpec = infiniteRepeatable(tween(9000, easing = LinearEasing)),
+                        label = "clock",
+                    )
+                } else {
+                    remember { mutableFloatStateOf(0f) }
+                }
+                CompositionLocalProvider(LocalAvatarClock provides clock) {
+                    LumenRoot(vm)
+                }
             }
         }
     }

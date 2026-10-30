@@ -7,6 +7,8 @@ import android.content.Context
 import android.os.Build
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
@@ -278,7 +280,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Bottom tab bar: each tab is a root; back from Money/Settings returns to Chats. */
+    /** Bumped when the user taps "Chats" while already there: the list jumps to the top. */
+    var scrollTopSignal by mutableIntStateOf(0)
+        private set
+    val chatListState = LazyListState()
+
+    fun scrollChatsToTop() {
+        scrollTopSignal++
+    }
+
     fun selectTab(tab: Screen) {
+        if (tab == Screen.List && screen == Screen.List) {
+            scrollTopSignal++
+            return
+        }
         selection = emptySet()
         stack.clear()
         stack.add(Screen.List)

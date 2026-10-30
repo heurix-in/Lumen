@@ -5,7 +5,15 @@ import androidx.compose.runtime.mutableStateOf
 import kotlin.properties.ReadWriteProperty
 import kotlin.reflect.KProperty
 
-enum class ThemeMode(val label: String) { System("Auto"), Dark("Espresso"), Black("Black"), Light("White") }
+enum class ThemeMode(val label: String) {
+    System("Auto"), Dark("Espresso"), Midnight("Midnight"), Grunge("Grunge"), Black("Black"), Paper("Paper"), Light("White")
+}
+enum class AppFont(val label: String) {
+    System("Default"), Manrope("Manrope"), Outfit("Outfit"), Jakarta("Jakarta"), Sora("Sora"),
+    SpaceGrotesk("Grotesk"), Lexend("Lexend"), Serif("Serif"), Mono("Mono")
+}
+enum class TextWeight(val label: String, val shift: Int) { Light("Light", -100), Regular("Regular", 0), Bold("Bold", 100) }
+enum class AvatarStyle(val label: String) { Orb("Orbs"), Shapes("Shapes"), Emoji("Emoji"), Initials("Letters"), Glyph("Plain") }
 enum class BubbleStyle(val label: String) { Ink("Ink"), Accent("Colour"), Glass("Glass") }
 enum class BubbleShape(val label: String) { Round("Round"), Soft("Square") }
 enum class BlurLevel(val label: String, val scale: Float) { Subtle("Subtle", 0.55f), Medium("Medium", 1f), Strong("Strong", 1.6f) }
@@ -60,6 +68,9 @@ class Prefs(context: Context) {
     var textScale: Float by float("text_scale", 1f)
     var blur: BlurLevel by enumOf("blur", BlurLevel.Medium, BlurLevel.values())
     var reduceMotion: Boolean by bool("reduce_motion", false)
+    var font: AppFont by enumOf("font", AppFont.System, AppFont.values())
+    var textWeight: TextWeight by enumOf("text_weight", TextWeight.Regular, TextWeight.values())
+    var avatarStyle: AvatarStyle by enumOf("avatar_style", AvatarStyle.Orb, AvatarStyle.values())
 
     // Messages
     var smartTabs: Boolean by bool("smart_tabs", true)

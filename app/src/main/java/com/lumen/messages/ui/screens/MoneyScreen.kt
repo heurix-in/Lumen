@@ -1,5 +1,14 @@
 package com.lumen.messages.ui.screens
 
+import androidx.compose.animation.slideInVertically
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.Canvas
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -228,6 +237,10 @@ fun MoneyScreen(vm: AppViewModel) {
             item(key = "chart") {
                 ChartCard(bars, primaryCurrency, vm.moneyMonth) { vm.moneyMonth = it }
             }
+            if (monthTx.any { it.kind == TxKind.Debit && it.currency == primaryCurrency }) {
+                item(key = "daily") { DailySpendCard(monthTx, vm.moneyMonth, primaryCurrency) }
+                item(key = "payees") { TopPayeesCard(monthTx, primaryCurrency) }
+            }
             item(key = "grouping") {
                 Segmented(
                     options = MoneyGrouping.values().toList(),
@@ -433,6 +446,10 @@ private fun SummaryCard(totals: List<Totals>, count: Int) {
     }
 }
 
+/**
+ * Modern diverging bar chart: money in rises above the baseline, money out drops below.
+ * Rounded gradient bars grow in with a stagger; the selected month glows and shows a value bubble.
+ */
 @Composable
 private fun ChartCard(
     bars: List<Triple<YearMonth, Double, Double>>,
@@ -445,65 +462,229 @@ private fun ChartCard(
     val grow = remember { Animatable(0f) }
     LaunchedEffect(bars) {
         grow.snapTo(0f)
-        grow.animateTo(1f, spring(dampingRatio = 0.75f, stiffness = 140f))
+        grow.animateTo(1f, spring(dampingRatio = 0.8f, stiffness = 90f))
     }
+    val selIndex = bars.indexOfFirst { it.first == selected }
+    val focus by animateFloatAsState(selIndex.toFloat(), spring(0.8f, 300f), label = "focus")
+    val sel = bars.getOrNull(selIndex)
+
     GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp)) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Last 6 months", style = LType.name.copy(color = p.text), modifier = Modifier.weight(1f))
+                Column(Modifier.weight(1f)) {
+                    Text("Cash flow", style = LType.name.copy(color = p.text))
+                    Text("Last 6 months · $currency", style = LType.micro.copy(color = p.textFaint))
+                }
                 Legend(p.success, "In")
                 Spacer(Modifier.width(10.dp))
                 Legend(p.danger, "Out")
-                Spacer(Modifier.width(10.dp))
-                Text(currency, style = LType.micro.copy(color = p.textFaint))
             }
-            Spacer(Modifier.height(14.dp))
-            Row(Modifier.fillMaxWidth().height(130.dp), verticalAlignment = Alignment.Bottom) {
-                bars.forEach { (m, inSum, outSum) ->
-                    val active = m == selected
-                    val bg by animateColorAsState(if (active) p.glassTint else Color.Transparent, label = "barBg")
-                    Column(
-                        Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(bg)
-                            .clickable { onSelect(m) }
-                            .padding(vertical = 6.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Row(
-                            Modifier.weight(1f),
-                            verticalAlignment = Alignment.Bottom,
-                            horizontalArrangement = Arrangement.spacedBy(3.dp),
-                        ) {
-                            Bar((inSum / max).toFloat() * grow.value, p.success)
-                            Bar((outSum / max).toFloat() * grow.value, p.danger)
-                        }
-                        Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(10.dp))
+            AnimatedContent(
+                targetState = sel,
+                transitionSpec = { (fadeIn(tween(200)) + slideInVertically { it / 3 }).togetherWith(fadeOut(tween(120))) },
+                label = "sel",
+            ) { s ->
+                if (s != null) {
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        val net = s.second - s.third
                         Text(
-                            m.format(monthShort),
-                            style = LType.micro.copy(
-                                color = if (active) p.text else p.textFaint,
-                                fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                            (if (net >= 0) "+" else "−") + formatMoney(kotlin.math.abs(net), currency),
+                            style = LType.title.copy(color = if (net >= 0) p.success else p.text, fontSize = 22.sp, fontWeight = FontWeight.Bold),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("net in ${s.first.format(monthShort)}", style = LType.caption.copy(color = p.textDim), modifier = Modifier.padding(bottom = 3.dp))
+                    }
+                } else Spacer(Modifier.height(1.dp))
+            }
+            Spacer(Modifier.height(10.dp))
+            Canvas(
+                Modifier
+                    .fillMaxWidth()
+                    .height(170.dp)
+                    .pointerInput(bars) {
+                        detectTapGestures { pos ->
+                            val i = (pos.x / (size.width / bars.size)).toInt().coerceIn(0, bars.lastIndex)
+                            onSelect(bars[i].first)
+                        }
+                    }
+            ) {
+                val n = bars.size
+                val slot = size.width / n
+                val mid = size.height * 0.56f
+                val upH = mid - 8.dp.toPx()
+                val downH = size.height - mid - 8.dp.toPx()
+                val bw = (slot * 0.26f).coerceAtMost(16.dp.toPx())
+                // Grid: dashed baseline and two faint guides.
+                val dash = PathEffect.dashPathEffect(floatArrayOf(6f, 8f))
+                drawLine(p.textFaint.copy(alpha = 0.5f), Offset(0f, mid), Offset(size.width, mid), 1.dp.toPx(), pathEffect = dash)
+                listOf(mid - upH * 0.5f, mid - upH).forEach {
+                    drawLine(p.divider, Offset(0f, it), Offset(size.width, it), 1.dp.toPx(), pathEffect = dash)
+                }
+                // Highlight column for the selected month (slides between months).
+                val hx = slot * focus
+                drawRoundRect(
+                    Brush.verticalGradient(listOf(p.glassTint, p.glassTint.copy(alpha = 0f))),
+                    topLeft = Offset(hx + slot * 0.08f, 0f),
+                    size = Size(slot * 0.84f, size.height),
+                    cornerRadius = CornerRadius(14.dp.toPx()),
+                )
+                bars.forEachIndexed { i, (m, inSum, outSum) ->
+                    val local = ((grow.value * 1.5f) - i * 0.1f).coerceIn(0f, 1f)
+                    val active = m == selected
+                    val alpha = if (active || selIndex < 0) 1f else 0.42f
+                    val cx = slot * i + slot / 2
+                    val hIn = (inSum / max).toFloat() * upH * local
+                    val hOut = (outSum / max).toFloat() * downH * local
+                    if (hIn > 0.5f) {
+                        drawRoundRect(
+                            Brush.verticalGradient(
+                                listOf(p.success.copy(alpha = alpha), p.success.copy(alpha = alpha * 0.35f)),
+                                startY = mid - hIn, endY = mid,
                             ),
+                            topLeft = Offset(cx - bw - 2.dp.toPx(), mid - hIn - 3.dp.toPx()),
+                            size = Size(bw, hIn),
+                            cornerRadius = CornerRadius(bw / 2),
                         )
                     }
+                    if (hOut > 0.5f) {
+                        drawRoundRect(
+                            Brush.verticalGradient(
+                                listOf(p.danger.copy(alpha = alpha * 0.35f), p.danger.copy(alpha = alpha)),
+                                startY = mid, endY = mid + hOut,
+                            ),
+                            topLeft = Offset(cx + 2.dp.toPx(), mid + 3.dp.toPx()),
+                            size = Size(bw, hOut),
+                            cornerRadius = CornerRadius(bw / 2),
+                        )
+                    }
+                    if (active) {
+                        // Glow dots on the bar tips.
+                        if (hIn > 0.5f) drawCircle(p.success.copy(alpha = 0.35f), bw * 0.9f, Offset(cx - bw / 2 - 2.dp.toPx(), mid - hIn - 3.dp.toPx()))
+                        if (hOut > 0.5f) drawCircle(p.danger.copy(alpha = 0.35f), bw * 0.9f, Offset(cx + bw / 2 + 2.dp.toPx(), mid + hOut + 3.dp.toPx()))
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Row(Modifier.fillMaxWidth()) {
+                bars.forEach { (m, _, _) ->
+                    val active = m == selected
+                    Text(
+                        m.format(monthShort),
+                        style = LType.micro.copy(
+                            color = if (active) p.text else p.textFaint,
+                            fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                        ),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
             }
         }
     }
 }
 
+/** Thin rounded columns for each day of the month; the biggest spending day is labelled. */
 @Composable
-private fun Bar(fraction: Float, color: Color) {
-    Box(
-        Modifier
-            .width(9.dp)
-            .fillMaxHeight(fraction.coerceIn(0.015f, 1f))
-            .clip(RoundedCornerShape(topStart = 5.dp, topEnd = 5.dp, bottomStart = 2.dp, bottomEnd = 2.dp))
-            .background(color)
-    )
+private fun DailySpendCard(monthTx: List<Transaction>, month: YearMonth, currency: String) {
+    val p = LocalPalette.current
+    val days = month.lengthOfMonth()
+    val perDay = remember(monthTx, currency) {
+        val arr = DoubleArray(days)
+        monthTx.filter { it.kind == TxKind.Debit && it.currency == currency }.forEach {
+            val d = Fmt.localDate(it.date).dayOfMonth - 1
+            if (d in 0 until days) arr[d] += it.amount
+        }
+        arr
+    }
+    val peak = perDay.indices.maxByOrNull { perDay[it] } ?: 0
+    val max = perDay.maxOrNull()?.coerceAtLeast(1.0) ?: 1.0
+    val grow = remember { Animatable(0f) }
+    LaunchedEffect(perDay.contentHashCode()) {
+        grow.snapTo(0f)
+        grow.animateTo(1f, spring(dampingRatio = 0.85f, stiffness = 80f))
+    }
+    GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp)) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Daily spending", style = LType.name.copy(color = p.text), modifier = Modifier.weight(1f))
+                Text(
+                    "Peak ${peak + 1} ${month.format(monthShort)} · ${formatMoney(perDay[peak], currency)}",
+                    style = LType.micro.copy(color = p.textDim),
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            Canvas(Modifier.fillMaxWidth().height(84.dp)) {
+                val slot = size.width / days
+                val bw = (slot * 0.55f).coerceAtLeast(2f)
+                for (i in 0 until days) {
+                    val local = ((grow.value * 1.6f) - i / days.toFloat() * 0.6f).coerceIn(0f, 1f)
+                    val h = ((perDay[i] / max).toFloat() * size.height * local).coerceAtLeast(3f)
+                    val isPeak = i == peak && perDay[i] > 0
+                    drawRoundRect(
+                        if (isPeak) Brush.verticalGradient(listOf(p.accentB, p.accentA))
+                        else Brush.verticalGradient(listOf(p.accentA.copy(alpha = if (perDay[i] > 0) 0.75f else 0.15f), p.accentA.copy(alpha = 0.12f))),
+                        topLeft = Offset(slot * i + (slot - bw) / 2, size.height - h),
+                        size = Size(bw, h),
+                        cornerRadius = CornerRadius(bw / 2),
+                    )
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(Modifier.fillMaxWidth()) {
+                Text("1", style = LType.micro.copy(color = p.textFaint), modifier = Modifier.weight(1f))
+                Text("${days / 2}", style = LType.micro.copy(color = p.textFaint), modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                Text("$days", style = LType.micro.copy(color = p.textFaint), modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.End)
+            }
+        }
+    }
+}
+
+/** Where the money went: top payees as animated rounded progress bars. */
+@Composable
+private fun TopPayeesCard(monthTx: List<Transaction>, currency: String) {
+    val p = LocalPalette.current
+    val top = remember(monthTx, currency) {
+        monthTx.filter { it.kind == TxKind.Debit && it.currency == currency }
+            .groupBy { it.party ?: it.bank }
+            .map { (k, v) -> k to v.sumOf { it.amount } }
+            .sortedByDescending { it.second }
+            .take(5)
+    }
+    val max = top.firstOrNull()?.second?.coerceAtLeast(1.0) ?: 1.0
+    val total = top.sumOf { it.second }.coerceAtLeast(1.0)
+    val grow = remember { Animatable(0f) }
+    LaunchedEffect(top) {
+        grow.snapTo(0f)
+        grow.animateTo(1f, spring(dampingRatio = 0.85f, stiffness = 90f))
+    }
+    GlassSurface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Top payees", style = LType.name.copy(color = p.text))
+            top.forEachIndexed { i, (name, amount) ->
+                val local = ((grow.value * 1.4f) - i * 0.1f).coerceIn(0f, 1f)
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(name, style = LType.caption.copy(color = p.text), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        Text(
+                            "${formatMoney(amount, currency)}  ${(amount / total * 100).toInt()}%",
+                            style = LType.micro.copy(color = p.textDim),
+                        )
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    Box(Modifier.fillMaxWidth().height(8.dp).clip(CircleShape).background(p.glassTint)) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth(((amount / max).toFloat() * local).coerceIn(0.02f, 1f))
+                                .fillMaxHeight()
+                                .clip(CircleShape)
+                                .background(Brush.horizontalGradient(listOf(p.accentC, p.accentA, p.accentB)))
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable

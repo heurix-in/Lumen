@@ -1,5 +1,21 @@
 package com.lumen.messages.ui.screens
 
+import com.lumen.messages.ui.theme.surfaceFor
+import com.lumen.messages.ui.theme.fontFamilyFor
+import com.lumen.messages.ui.theme.buildPalette
+import com.lumen.messages.ui.theme.LumenSurface
+import com.lumen.messages.ui.components.Avatar
+import com.lumen.messages.data.TextWeight
+import com.lumen.messages.data.AvatarStyle
+import com.lumen.messages.data.AppFont
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.Image
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.fadeIn
@@ -105,13 +121,8 @@ fun SettingsScreen(vm: AppViewModel, onRequestDefault: () -> Unit) {
             item(key = "look-h") { SectionHeader("Customize look") }
             item(key = "look") {
                 Group {
-                    LabeledControl("Screen colour") {
-                        Segmented(
-                            options = ThemeMode.values().toList(),
-                            selected = prefs.themeMode,
-                            label = { it.label },
-                            onSelect = { prefs.themeMode = it },
-                        )
+                    LabeledControl("Background") {
+                        BackgroundPicker(prefs.themeMode) { prefs.themeMode = it }
                     }
                     Divider()
                     LabeledControl("Theme colour") { Swatches(prefs.accent) { prefs.accent = it } }
@@ -145,6 +156,34 @@ fun SettingsScreen(vm: AppViewModel, onRequestDefault: () -> Unit) {
                     }
                     Divider()
                     ToggleRow("Reduce motion", "Fewer animations", prefs.reduceMotion) { prefs.reduceMotion = it }
+                }
+            }
+
+            item(key = "type-h") { SectionHeader("Text style") }
+            item(key = "type") {
+                Group {
+                    LabeledControl("Font") { FontPicker(prefs.font) { prefs.font = it } }
+                    Divider()
+                    LabeledControl("Weight") {
+                        Segmented(TextWeight.values().toList(), prefs.textWeight, { it.label }) { prefs.textWeight = it }
+                    }
+                    Divider()
+                    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                        Text("The quick brown fox", style = LType.title.copy(color = p.text))
+                        Text(
+                            "Your code is 482913 · Rs 2,500 credited to A/c XX1234",
+                            style = LType.body.copy(color = p.textDim),
+                        )
+                    }
+                }
+            }
+
+            item(key = "avatar-h") { SectionHeader("Contact icons") }
+            item(key = "avatar") {
+                Group {
+                    LabeledControl("Style for contacts without a photo") {
+                        AvatarPicker(prefs.avatarStyle) { prefs.avatarStyle = it }
+                    }
                 }
             }
 
@@ -252,7 +291,7 @@ fun SettingsScreen(vm: AppViewModel, onRequestDefault: () -> Unit) {
             }
             item(key = "about") {
                 Text(
-                    "Lumen 1.2",
+                    "Lumen 1.3",
                     style = LType.micro.copy(color = p.textFaint),
                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -513,5 +552,126 @@ private fun HelpStep(n: Int, text: String) {
         ) { Text("$n", style = LType.micro.copy(color = Color.White, fontWeight = FontWeight.Bold)) }
         Spacer(Modifier.width(10.dp))
         Text(text, style = LType.caption.copy(color = p.textDim, fontWeight = FontWeight.Normal))
+    }
+}
+
+private data class BgSample(val mode: ThemeMode, val surface: LumenSurface?)
+
+/** Visual tiles for each background, with a springy selection ring. */
+@Composable
+private fun BackgroundPicker(selected: ThemeMode, onSelect: (ThemeMode) -> Unit) {
+    val p = LocalPalette.current
+    val systemDark = isSystemInDarkTheme()
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        items(ThemeMode.values().toList(), key = { it.name }) { mode ->
+            val surface = surfaceFor(mode, systemDark)
+            val sp = remember(surface) { buildPalette(surface, p.accentA) }
+            val active = mode == selected
+            val ring by animateDpAsState(if (active) 2.5.dp else 1.dp, spring(0.5f, 500f), label = "ring")
+            val scale by animateFloatAsState(if (active) 1.04f else 1f, spring(0.5f, 500f), label = "bgScale")
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
+                    Modifier
+                        .size(width = 62.dp, height = 96.dp)
+                        .graphicsLayer { scaleX = scale; scaleY = scale }
+                        .clip(RoundedCornerShape(16.dp))
+                        .border(ring, if (active) p.accentA else p.glassEdgeLight, RoundedCornerShape(16.dp))
+                        .clickable { onSelect(mode) }
+                ) {
+                    if (sp.texture != 0) {
+                        Image(
+                            painterResource(sp.texture), null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        Box(
+                            Modifier.fillMaxSize().background(
+                                Brush.verticalGradient(0f to sp.bgTop, 0.45f to sp.bgMid, 1f to sp.bg)
+                            )
+                        )
+                    }
+                    // Mini chat preview inside the tile
+                    Column(Modifier.padding(8.dp).align(Alignment.BottomCenter), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Box(Modifier.size(width = 30.dp, height = 9.dp).clip(CircleShape).background(sp.received))
+                        Box(
+                            Modifier.align(Alignment.End).size(width = 26.dp, height = 9.dp).clip(CircleShape)
+                                .background(if (sp.dark) Color.Black.copy(alpha = 0.7f) else sp.ink)
+                        )
+                    }
+                    if (mode == ThemeMode.System) {
+                        Text(
+                            "A", style = LType.caption.copy(color = sp.text, fontWeight = FontWeight.Bold),
+                            modifier = Modifier.align(Alignment.TopStart).padding(7.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(mode.label, style = LType.micro.copy(color = if (active) p.text else p.textDim))
+            }
+        }
+    }
+}
+
+@Composable
+private fun FontPicker(selected: AppFont, onSelect: (AppFont) -> Unit) {
+    val p = LocalPalette.current
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(AppFont.values().toList(), key = { it.name }) { f ->
+            val family = remember(f) { fontFamilyFor(f) }
+            val active = f == selected
+            val bg by animateColorAsState(if (active) p.accentA else p.glassTint, label = "fontBg")
+            Column(
+                Modifier
+                    .size(width = 74.dp, height = 70.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(bg)
+                    .border(1.dp, if (active) Color.Transparent else p.glassEdgeLight, RoundedCornerShape(16.dp))
+                    .clickable { onSelect(f) },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text(
+                    "Aa",
+                    style = TextStyle(fontFamily = family, fontSize = 22.sp, fontWeight = FontWeight.SemiBold,
+                        color = if (active) Color.White else p.text),
+                )
+                Text(
+                    f.label,
+                    style = TextStyle(fontFamily = family, fontSize = 11.sp,
+                        color = if (active) Color.White.copy(alpha = 0.85f) else p.textDim),
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AvatarPicker(selected: AvatarStyle, onSelect: (AvatarStyle) -> Unit) {
+    val p = LocalPalette.current
+    val look = LocalLook.current
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        AvatarStyle.values().forEach { style ->
+            val active = style == selected
+            val scale by animateFloatAsState(if (active) 1.08f else 1f, spring(0.45f, 500f), label = "av")
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.clip(RoundedCornerShape(14.dp)).clickable { onSelect(style) }.padding(4.dp),
+            ) {
+                CompositionLocalProvider(LocalLook provides look.copy(avatarStyle = style)) {
+                    Box(
+                        Modifier
+                            .graphicsLayer { scaleX = scale; scaleY = scale }
+                            .border(if (active) 2.dp else 0.dp, if (active) p.accentA else Color.Transparent, CircleShape)
+                            .padding(3.dp)
+                    ) {
+                        Avatar(name = "Sample Name", address = "+965 5555 ${style.ordinal}21", photoUri = null, size = 46.dp)
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(style.label, style = LType.micro.copy(color = if (active) p.text else p.textDim))
+            }
+        }
     }
 }

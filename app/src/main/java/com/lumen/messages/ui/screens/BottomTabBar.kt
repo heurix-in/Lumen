@@ -78,7 +78,7 @@ fun BottomTabBar(
             modifier = Modifier.weight(1f).height(64.dp),
             shape = RoundedCornerShape(32.dp),
             backdrop = backdrop,
-            tint = p.barTint.copy(alpha = (p.barTint.alpha + 0.15f).coerceAtMost(0.9f)),
+            tint = p.tabBar,
         ) {
             BoxWithConstraints(Modifier.fillMaxSize().padding(5.dp)) {
                 val w = maxWidth / tabs.size
@@ -128,7 +128,7 @@ fun BottomTabBar(
             modifier = Modifier.size(64.dp).pressScale(interaction, 0.88f),
             shape = CircleShape,
             backdrop = backdrop,
-            tint = p.barTint.copy(alpha = (p.barTint.alpha + 0.15f).coerceAtMost(0.9f)),
+            tint = p.tabBar,
         ) {
             Box(
                 Modifier.fillMaxSize().clickable(interaction, ripple(color = p.text), onClick = onCompose),
