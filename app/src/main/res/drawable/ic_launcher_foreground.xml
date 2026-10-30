@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Main gradient bubble -->
+    <path android:pathData="M42,30H56A14,14 0,0 1,70 44V48A14,14 0,0 1,56 62H44L33,71L35,61A14,14 0,0 1,28 48V44A14,14 0,0 1,42 30Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="28" android:startY="30" android:endX="70" android:endY="70">
+                <item android:offset="0" android:color="#FFB06BFF" />
+                <item android:offset="0.5" android:color="#FF7C5CFF" />
+                <item android:offset="1" android:color="#FF00B8FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Glass bubble -->
+    <path
+        android:fillColor="#59FFFFFF"
+        android:strokeColor="#CCFFFFFF"
+        android:strokeWidth="1.4"
+        android:pathData="M59,50H67A13,13 0,0 1,80 63A13,13 0,0 1,72 75L76,82L66,76H59A13,13 0,0 1,46 63A13,13 0,0 1,59 50Z" />
+    <!-- Dots -->
+    <path android:fillColor="#FFFFFFFF" android:pathData="M56,63m-2.2,0a2.2,2.2 0,1 1,4.4 0a2.2,2.2 0,1 1,-4.4 0" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M63,63m-2.2,0a2.2,2.2 0,1 1,4.4 0a2.2,2.2 0,1 1,-4.4 0" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M70,63m-2.2,0a2.2,2.2 0,1 1,4.4 0a2.2,2.2 0,1 1,-4.4 0" />
+</vector>

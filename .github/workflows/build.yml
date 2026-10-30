@@ -1,0 +1,77 @@
+name: Build Lumen APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build the APK
+        shell: bash
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease 2>&1 | tee build.log
+
+      - name: Privacy check (fails the build if INTERNET permission exists)
+        shell: bash
+        run: |
+          AAPT=$(ls "$ANDROID_HOME"/build-tools/*/aapt | sort -V | tail -1)
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
+          echo "Permissions inside the APK:"
+          "$AAPT" dump permissions "$APK" | tee permissions.txt
+          if grep -q "android.permission.INTERNET" permissions.txt; then
+            echo "::error::INTERNET permission found in APK"
+            exit 1
+          fi
+          echo "OK: no INTERNET permission. The app cannot send data off the phone."
+          cp "$APK" Lumen.apk
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lumen-apk
+          path: |
+            Lumen.apk
+            permissions.txt
+
+      - name: Publish the APK to the "apk" branch
+        if: success()
+        shell: bash
+        run: |
+          mkdir out && cp Lumen.apk permissions.txt out/
+          cd out
+          git init -q -b apk
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add . && git commit -qm "Lumen APK from ${GITHUB_SHA::7}"
+          git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" apk
+
+      - name: Publish the build log on failure
+        if: failure()
+        shell: bash
+        run: |
+          mkdir logout && cp build.log logout/ 2>/dev/null || echo "no build log" > logout/build.log
+          cd logout
+          git init -q -b build-log
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add . && git commit -qm "Build log for ${GITHUB_SHA::7}"
+          git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" build-log
