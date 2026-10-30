@@ -32,6 +32,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -64,13 +65,13 @@ fun Modifier.pressScale(interaction: MutableInteractionSource, pressed: Float = 
 }
 
 private val avatarGradients = listOf(
-    listOf(Color(0xFF7C5CFF), Color(0xFF00C6FF)),
-    listOf(Color(0xFFFF5FA2), Color(0xFFFFB86B)),
-    listOf(Color(0xFF22E3B5), Color(0xFF2A7FFF)),
-    listOf(Color(0xFFB06BFF), Color(0xFFFF6B9E)),
-    listOf(Color(0xFFFFC857), Color(0xFFFF6B6B)),
-    listOf(Color(0xFF3DDC97), Color(0xFF00A3FF)),
-    listOf(Color(0xFF5B8CFF), Color(0xFFB45CFF)),
+    listOf(Color(0xFFC98B6B), Color(0xFF7A4A36)),
+    listOf(Color(0xFF8A9BB0), Color(0xFF46566B)),
+    listOf(Color(0xFFB59A6A), Color(0xFF6E5A36)),
+    listOf(Color(0xFF9C7FB0), Color(0xFF574468)),
+    listOf(Color(0xFF7FA89A), Color(0xFF3F6458)),
+    listOf(Color(0xFFC0787A), Color(0xFF6E3B3E)),
+    listOf(Color(0xFF8C8C94), Color(0xFF4A4A52)),
 )
 
 private object PhotoCache {
@@ -119,6 +120,7 @@ fun Avatar(
     size: Dp,
     modifier: Modifier = Modifier,
     selected: Boolean = false,
+    shape: Shape = CircleShape,
 ) {
     val p = LocalPalette.current
     val photo = rememberContactPhoto(photoUri)
@@ -143,7 +145,7 @@ fun Avatar(
             Box(
                 Modifier
                     .fillMaxSize()
-                    .clip(CircleShape)
+                    .clip(shape)
                     .background(Brush.linearGradient(gradient)),
                 contentAlignment = Alignment.Center,
             ) {
@@ -174,7 +176,7 @@ fun Avatar(
                 Modifier
                     .fillMaxSize()
                     .graphicsLayer { rotationY = 180f }
-                    .clip(CircleShape)
+                    .clip(shape)
                     .background(p.accentBrush),
                 contentAlignment = Alignment.Center,
             ) {
@@ -225,13 +227,13 @@ fun CountBadge(count: Int, modifier: Modifier = Modifier) {
     Box(
         modifier
             .clip(CircleShape)
-            .background(p.accentBrush)
-            .size(width = if (count > 9) 28.dp else 22.dp, height = 22.dp),
+            .background(p.badge)
+            .size(width = if (count > 9) 26.dp else 20.dp, height = 20.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             if (count > 99) "99+" else count.toString(),
-            style = TextStyle(color = p.onAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold),
+            style = TextStyle(color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold),
         )
     }
 }

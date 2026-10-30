@@ -42,11 +42,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.lumen.messages.notify.Notifier
 import com.lumen.messages.ui.glass.AuroraBackground
+import com.lumen.messages.ui.glass.backdropSource
+import com.lumen.messages.ui.glass.rememberBackdropState
 import com.lumen.messages.ui.screens.ConversationListScreen
 import com.lumen.messages.ui.screens.NewMessageScreen
 import com.lumen.messages.ui.screens.OnboardingScreen
 import com.lumen.messages.ui.screens.ThreadScreen
 import com.lumen.messages.ui.theme.LumenTheme
+import com.lumen.messages.ui.theme.LumenSurface
+import com.lumen.messages.ui.theme.surfaceFor
+import com.lumen.messages.ui.screens.ContactScreen
+import com.lumen.messages.ui.screens.BottomTabBar
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.ui.Alignment
 
 class MainActivity : ComponentActivity() {
 
@@ -58,11 +68,8 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) handleIntent(intent)
         setContent {
             val systemDark = isSystemInDarkTheme()
-            val dark = when (vm.prefs.themeMode) {
-                ThemeMode.System -> systemDark
-                ThemeMode.Light -> false
-                ThemeMode.Dark -> true
-            }
+            val surface = surfaceFor(vm.prefs.themeMode, systemDark)
+            val dark = surface != LumenSurface.White
             // Status-bar icons must contrast with the chosen screen colour, not the system one.
             DisposableEffect(dark) {
                 val style = if (dark) SystemBarStyle.dark(AndroidColor.TRANSPARENT)
@@ -70,7 +77,7 @@ class MainActivity : ComponentActivity() {
                 enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
                 onDispose { }
             }
-            LumenTheme(vm.prefs, dark) {
+            LumenTheme(vm.prefs, surface) {
                 LumenRoot(vm)
             }
         }
@@ -174,49 +181,71 @@ fun LumenRoot(vm: AppViewModel) {
 private fun MainScreens(vm: AppViewModel, requestDefault: () -> Unit, requestContacts: () -> Unit) {
     BackHandler(enabled = vm.screen != Screen.List) { vm.back() }
 
-    SharedTransitionLayout(Modifier.fillMaxSize()) {
-        AnimatedContent(
-            targetState = vm.screen,
-            transitionSpec = {
-                val push = targetState.depth > initialState.depth
-                // Shared-axis style: the new screen glides in, the old one eases back and dims.
-                val t: ContentTransform = if (push) {
-                    (slideInHorizontally(spring(dampingRatio = 0.9f, stiffness = 420f)) { (it * 0.35f).toInt() } +
-                        fadeIn(tween(220, delayMillis = 30)))
-                        .togetherWith(
-                            slideOutHorizontally(spring(dampingRatio = 1f, stiffness = 420f)) { -(it * 0.12f).toInt() } +
-                                fadeOut(tween(180)) + scaleOut(tween(300), targetScale = 0.96f)
-                        )
-                } else {
-                    (slideInHorizontally(spring(dampingRatio = 1f, stiffness = 420f)) { -(it * 0.12f).toInt() } +
-                        fadeIn(tween(240)) + scaleIn(spring(0.9f, 420f), initialScale = 0.96f))
-                        .togetherWith(
-                            slideOutHorizontally(spring(dampingRatio = 0.9f, stiffness = 420f)) { (it * 0.35f).toInt() } +
-                                fadeOut(tween(160))
-                        )
+    val rootBackdrop = rememberBackdropState()
+    Box(Modifier.fillMaxSize()) {
+        SharedTransitionLayout(Modifier.fillMaxSize().backdropSource(rootBackdrop)) {
+            AnimatedContent(
+                targetState = vm.screen,
+                transitionSpec = {
+                    val from = initialState.depth
+                    val to = targetState.depth
+                    val t: ContentTransform = when {
+                        // Switching tabs: soft cross-fade with a hint of depth.
+                        from == to -> (fadeIn(tween(260, delayMillis = 60)) + scaleIn(spring(0.9f, 380f), initialScale = 0.985f))
+                            .togetherWith(fadeOut(tween(140)))
+                        // Going deeper: the new screen glides in, the old one eases back.
+                        to > from -> (slideInHorizontally(spring(dampingRatio = 0.9f, stiffness = 420f)) { (it * 0.35f).toInt() } +
+                            fadeIn(tween(220, delayMillis = 30)))
+                            .togetherWith(
+                                slideOutHorizontally(spring(dampingRatio = 1f, stiffness = 420f)) { -(it * 0.12f).toInt() } +
+                                    fadeOut(tween(180)) + scaleOut(tween(300), targetScale = 0.96f)
+                            )
+                        else -> (slideInHorizontally(spring(dampingRatio = 1f, stiffness = 420f)) { -(it * 0.12f).toInt() } +
+                            fadeIn(tween(240)) + scaleIn(spring(0.9f, 420f), initialScale = 0.96f))
+                            .togetherWith(
+                                slideOutHorizontally(spring(dampingRatio = 0.9f, stiffness = 420f)) { (it * 0.35f).toInt() } +
+                                    fadeOut(tween(160))
+                            )
+                    }
+                    t.targetContentZIndex = if (to >= from) 1f else 0f
+                    t.using(SizeTransform(clip = false))
+                },
+                label = "screens",
+            ) { target ->
+                when (target) {
+                    Screen.List -> ConversationListScreen(
+                        vm = vm,
+                        sharedScope = this@SharedTransitionLayout,
+                        animScope = this@AnimatedContent,
+                        onRequestDefault = requestDefault,
+                    )
+                    is Screen.Thread -> ThreadScreen(
+                        vm = vm,
+                        threadId = target.threadId,
+                        sharedScope = this@SharedTransitionLayout,
+                        animScope = this@AnimatedContent,
+                    )
+                    is Screen.NewMessage -> NewMessageScreen(vm, onRequestContacts = requestContacts)
+                    Screen.Money -> MoneyScreen(vm)
+                    Screen.Settings -> SettingsScreen(vm, onRequestDefault = requestDefault)
+                    is Screen.Contact -> ContactScreen(vm)
                 }
-                t.targetContentZIndex = if (push) 1f else 0f
-                t.using(SizeTransform(clip = false))
-            },
-            label = "screens",
-        ) { target ->
-            when (target) {
-                Screen.List -> ConversationListScreen(
-                    vm = vm,
-                    sharedScope = this@SharedTransitionLayout,
-                    animScope = this@AnimatedContent,
-                    onRequestDefault = requestDefault,
-                )
-                is Screen.Thread -> ThreadScreen(
-                    vm = vm,
-                    threadId = target.threadId,
-                    sharedScope = this@SharedTransitionLayout,
-                    animScope = this@AnimatedContent,
-                )
-                is Screen.NewMessage -> NewMessageScreen(vm, onRequestContacts = requestContacts)
-                Screen.Money -> MoneyScreen(vm)
-                Screen.Settings -> SettingsScreen(vm, onRequestDefault = requestDefault)
             }
+        }
+
+        // Floating glass tab bar, only on the three main tabs.
+        AnimatedVisibility(
+            visible = vm.screen.depth == 0 && vm.selection.isEmpty(),
+            enter = slideInVertically(spring(dampingRatio = 0.8f, stiffness = 400f)) { it } + fadeIn(),
+            exit = slideOutVertically(tween(200)) { it } + fadeOut(tween(150)),
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            BottomTabBar(
+                current = vm.screen,
+                onSelect = vm::selectTab,
+                onCompose = { vm.openNewMessage() },
+                backdrop = rootBackdrop,
+            )
         }
     }
 }

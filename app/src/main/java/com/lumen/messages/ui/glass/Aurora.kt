@@ -12,8 +12,8 @@ import com.lumen.messages.ui.theme.LocalPalette
 import kotlin.math.max
 
 /**
- * Plain white or pure black backdrop. A barely-visible accent glow in two corners
- * gives the glass edges something to catch, without colouring the screen.
+ * Warm glow at the top that fades to near-black (or white), like a softly lit photo
+ * behind frosted glass. Static — no per-frame work.
  */
 @Composable
 fun AuroraBackground(modifier: Modifier = Modifier) {
@@ -22,26 +22,33 @@ fun AuroraBackground(modifier: Modifier = Modifier) {
         modifier
             .fillMaxSize()
             .drawBehind {
-                drawRect(Brush.verticalGradient(listOf(p.bg, p.bgSoft)))
-                val r = max(size.width, size.height)
-                val glow = if (p.dark) 0.10f else 0.06f
-                drawCircle(
-                    Brush.radialGradient(
-                        listOf(p.accentA.copy(alpha = glow), Color.Transparent),
-                        center = Offset(size.width * 1.0f, 0f),
-                        radius = r * 0.7f,
-                    ),
-                    radius = r * 0.7f,
-                    center = Offset(size.width * 1.0f, 0f),
+                drawRect(
+                    Brush.verticalGradient(
+                        0f to p.bgTop,
+                        0.38f to p.bgMid,
+                        1f to p.bg,
+                    )
                 )
+                val r = max(size.width, size.height)
+                // Soft highlight, like light catching the top of the glass.
                 drawCircle(
                     Brush.radialGradient(
-                        listOf(p.accentA.copy(alpha = glow * 0.7f), Color.Transparent),
-                        center = Offset(0f, size.height),
-                        radius = r * 0.6f,
+                        listOf(p.bgTop.copy(alpha = if (p.dark) 0.85f else 0.7f), Color.Transparent),
+                        center = Offset(size.width * 0.78f, -r * 0.05f),
+                        radius = r * 0.55f,
                     ),
-                    radius = r * 0.6f,
-                    center = Offset(0f, size.height),
+                    radius = r * 0.55f,
+                    center = Offset(size.width * 0.78f, -r * 0.05f),
+                )
+                // A faint ember of the accent colour low on the screen.
+                drawCircle(
+                    Brush.radialGradient(
+                        listOf(p.accentA.copy(alpha = if (p.dark) 0.07f else 0.05f), Color.Transparent),
+                        center = Offset(0f, size.height * 0.92f),
+                        radius = r * 0.5f,
+                    ),
+                    radius = r * 0.5f,
+                    center = Offset(0f, size.height * 0.92f),
                 )
             }
     )

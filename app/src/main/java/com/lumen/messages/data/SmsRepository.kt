@@ -312,6 +312,33 @@ class SmsRepository(private val context: Context) {
         return out
     }
 
+    fun threadStats(threadId: Long): ThreadStats? {
+        if (!has(Manifest.permission.READ_SMS)) return null
+        return try {
+            cr.query(
+                SMS_URI, arrayOf(SmsCol.TYPE, SmsCol.DATE, SmsCol.BODY, SmsCol.ID, SmsCol.ADDRESS),
+                "${SmsCol.THREAD_ID} = ?", arrayOf(threadId.toString()), "${SmsCol.DATE} ASC"
+            )?.use { c ->
+                var total = 0; var sent = 0; var received = 0; var first = 0L; var otps = 0; var tx = 0
+                while (c.moveToNext()) {
+                    val type = c.getInt(0)
+                    if (type == SmsCol.TYPE_DRAFT) continue
+                    if (total == 0) first = c.getLong(1)
+                    total++
+                    if (type == SmsCol.TYPE_INBOX) {
+                        received++
+                        val body = c.getString(2).orEmpty()
+                        if (findOtp(body) != null) otps++
+                        else if (BankParser.parse(c.getLong(3), threadId, c.getString(4).orEmpty(), body, 0) != null) tx++
+                    } else sent++
+                }
+                ThreadStats(total, sent, received, first, otps, tx)
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun headerFor(threadId: Long): ThreadHeader? {
         if (!has(Manifest.permission.READ_SMS)) return null
         return try {

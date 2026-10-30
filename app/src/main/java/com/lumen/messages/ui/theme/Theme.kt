@@ -20,11 +20,14 @@ import com.lumen.messages.data.BlurLevel
 import com.lumen.messages.data.BubbleShape
 import com.lumen.messages.data.BubbleStyle
 import com.lumen.messages.data.Prefs
+import com.lumen.messages.data.ThemeMode
 
 @Immutable
 data class LumenPalette(
     val dark: Boolean,
-    val bg: Color,
+    val bgTop: Color,       // warm glow at the top of the screen
+    val bgMid: Color,
+    val bg: Color,          // bottom / base colour
     val bgSoft: Color,
     val text: Color,
     val textDim: Color,
@@ -38,7 +41,12 @@ data class LumenPalette(
     val accentB: Color,
     val accentC: Color,
     val received: Color,
+    val ink: Color,         // sent bubble ("ink" style)
+    val onInk: Color,
     val onAccent: Color,
+    val chipActive: Color,
+    val onChipActive: Color,
+    val badge: Color,
     val danger: Color,
     val success: Color,
     val scrim: Color,
@@ -47,65 +55,109 @@ data class LumenPalette(
     val accentBrush: Brush get() = Brush.linearGradient(listOf(accentA, accentB))
 }
 
-/** Pure black or pure white base, glass surfaces, and one accent colour. */
-fun buildPalette(dark: Boolean, accent: Color): LumenPalette = if (dark) {
-    LumenPalette(
+enum class LumenSurface { Espresso, Black, White }
+
+/** Espresso (warm glow fading to black), pure Black, or White — all with glass surfaces. */
+fun buildPalette(surface: LumenSurface, accent: Color): LumenPalette = when (surface) {
+    LumenSurface.Espresso -> LumenPalette(
         dark = true,
+        bgTop = Color(0xFF6B4A3B),
+        bgMid = Color(0xFF2B1F1A),
+        bg = Color(0xFF0B0908),
+        bgSoft = Color(0xFF14100E),
+        text = Color(0xFFF7F1EC),
+        textDim = Color(0xFFF7F1EC).copy(alpha = 0.62f),
+        textFaint = Color(0xFFF7F1EC).copy(alpha = 0.38f),
+        glassTint = Color.White.copy(alpha = 0.08f),
+        barTint = Color(0xFF1E1613).copy(alpha = 0.42f),
+        glassEdgeLight = Color.White.copy(alpha = 0.16f),
+        glassEdgeDark = Color.White.copy(alpha = 0.03f),
+        glassSheen = Color.White.copy(alpha = 0.04f),
+        accentA = accent,
+        accentB = lerp(accent, Color.White, 0.25f),
+        accentC = lerp(accent, Color.Black, 0.2f),
+        received = Color(0xFF2A201C).copy(alpha = 0.78f),
+        ink = Color(0xFF0D0A09),
+        onInk = Color(0xFFF7F1EC),
+        onAccent = Color.White,
+        chipActive = Color.White.copy(alpha = 0.22f),
+        onChipActive = Color.White,
+        badge = Color(0xFFFF3B30),
+        danger = Color(0xFFFF5C5C),
+        success = Color(0xFF3DDC97),
+        scrim = Color.Black.copy(alpha = 0.6f),
+        divider = Color.White.copy(alpha = 0.07f),
+    )
+    LumenSurface.Black -> LumenPalette(
+        dark = true,
+        bgTop = Color(0xFF16161A),
+        bgMid = Color(0xFF060607),
         bg = Color.Black,
         bgSoft = Color(0xFF0A0A0C),
         text = Color.White,
         textDim = Color.White.copy(alpha = 0.62f),
         textFaint = Color.White.copy(alpha = 0.38f),
         glassTint = Color.White.copy(alpha = 0.075f),
-        barTint = Color.Black.copy(alpha = 0.55f),
-        glassEdgeLight = Color.White.copy(alpha = 0.20f),
-        glassEdgeDark = Color.White.copy(alpha = 0.04f),
-        glassSheen = Color.White.copy(alpha = 0.05f),
+        barTint = Color.Black.copy(alpha = 0.5f),
+        glassEdgeLight = Color.White.copy(alpha = 0.16f),
+        glassEdgeDark = Color.White.copy(alpha = 0.03f),
+        glassSheen = Color.White.copy(alpha = 0.04f),
         accentA = accent,
-        accentB = lerp(accent, Color.White, 0.28f),
-        accentC = lerp(accent, Color.Black, 0.22f),
-        received = Color.White.copy(alpha = 0.11f),
+        accentB = lerp(accent, Color.White, 0.25f),
+        accentC = lerp(accent, Color.Black, 0.2f),
+        received = Color.White.copy(alpha = 0.10f),
+        ink = Color(0xFF2A2A2E),
+        onInk = Color.White,
         onAccent = Color.White,
-        danger = Color(0xFFFF5C6C),
+        chipActive = Color.White.copy(alpha = 0.22f),
+        onChipActive = Color.White,
+        badge = Color(0xFFFF3B30),
+        danger = Color(0xFFFF5C5C),
         success = Color(0xFF34D399),
         scrim = Color.Black.copy(alpha = 0.62f),
-        divider = Color.White.copy(alpha = 0.08f),
+        divider = Color.White.copy(alpha = 0.07f),
     )
-} else {
-    LumenPalette(
+    LumenSurface.White -> LumenPalette(
         dark = false,
+        bgTop = Color(0xFFF3E9E2),
+        bgMid = Color(0xFFFAF7F5),
         bg = Color.White,
-        bgSoft = Color(0xFFF4F5F8),
-        text = Color(0xFF0B0B10),
-        textDim = Color(0xFF0B0B10).copy(alpha = 0.60f),
-        textFaint = Color(0xFF0B0B10).copy(alpha = 0.38f),
-        glassTint = Color(0xFF8A8FA3).copy(alpha = 0.085f),
-        barTint = Color.White.copy(alpha = 0.72f),
-        glassEdgeLight = Color.Black.copy(alpha = 0.09f),
+        bgSoft = Color(0xFFF7F5F3),
+        text = Color(0xFF14100E),
+        textDim = Color(0xFF14100E).copy(alpha = 0.60f),
+        textFaint = Color(0xFF14100E).copy(alpha = 0.38f),
+        glassTint = Color(0xFF8C7F78).copy(alpha = 0.09f),
+        barTint = Color.White.copy(alpha = 0.66f),
+        glassEdgeLight = Color.Black.copy(alpha = 0.08f),
         glassEdgeDark = Color.Black.copy(alpha = 0.03f),
-        glassSheen = Color.White.copy(alpha = 0.55f),
+        glassSheen = Color.White.copy(alpha = 0.5f),
         accentA = accent,
         accentB = lerp(accent, Color.White, 0.22f),
         accentC = lerp(accent, Color.Black, 0.18f),
-        received = Color(0xFF8A8FA3).copy(alpha = 0.13f),
+        received = Color(0xFF8C7F78).copy(alpha = 0.13f),
+        ink = Color(0xFF14100E),
+        onInk = Color.White,
         onAccent = Color.White,
+        chipActive = Color(0xFF14100E),
+        onChipActive = Color.White,
+        badge = Color(0xFFFF3B30),
         danger = Color(0xFFE5334B),
         success = Color(0xFF12A36F),
         scrim = Color.Black.copy(alpha = 0.30f),
-        divider = Color.Black.copy(alpha = 0.07f),
+        divider = Color.Black.copy(alpha = 0.06f),
     )
 }
 
 /** Look settings the screens need while drawing. */
 @Immutable
 data class LookSettings(
-    val bubbleStyle: BubbleStyle = BubbleStyle.Solid,
+    val bubbleStyle: BubbleStyle = BubbleStyle.Ink,
     val bubbleShape: BubbleShape = BubbleShape.Round,
     val blur: BlurLevel = BlurLevel.Medium,
     val reduceMotion: Boolean = false,
 )
 
-val LocalPalette = staticCompositionLocalOf { buildPalette(true, Color(0xFF3D7BFF)) }
+val LocalPalette = staticCompositionLocalOf { buildPalette(LumenSurface.Espresso, Color(0xFFF5793B)) }
 val LocalLook = staticCompositionLocalOf { LookSettings() }
 
 object LType {
@@ -120,12 +172,19 @@ object LType {
     val section = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
 }
 
+fun surfaceFor(mode: ThemeMode, systemDark: Boolean): LumenSurface = when (mode) {
+    ThemeMode.System -> if (systemDark) LumenSurface.Espresso else LumenSurface.White
+    ThemeMode.Dark -> LumenSurface.Espresso
+    ThemeMode.Black -> LumenSurface.Black
+    ThemeMode.Light -> LumenSurface.White
+}
+
 @Composable
-fun LumenTheme(prefs: Prefs, dark: Boolean, content: @Composable () -> Unit) {
+fun LumenTheme(prefs: Prefs, surface: LumenSurface, content: @Composable () -> Unit) {
     val accent = Color(prefs.accent.toInt())
-    val palette = remember(dark, accent) { buildPalette(dark, accent) }
+    val palette = remember(surface, accent) { buildPalette(surface, accent) }
     val look = LookSettings(prefs.bubbleStyle, prefs.bubbleShape, prefs.blur, prefs.reduceMotion)
-    val scheme = if (dark) {
+    val scheme = if (palette.dark) {
         darkColorScheme(primary = accent, secondary = palette.accentB, error = palette.danger, background = palette.bg)
     } else {
         lightColorScheme(primary = accent, secondary = palette.accentB, error = palette.danger, background = palette.bg)

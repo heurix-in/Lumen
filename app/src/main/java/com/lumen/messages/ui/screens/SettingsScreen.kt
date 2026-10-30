@@ -1,5 +1,11 @@
 package com.lumen.messages.ui.screens
 
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.AnimatedVisibility
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.animation.animateColorAsState
@@ -57,6 +63,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.lumen.messages.data.AccentChoices
 import com.lumen.messages.data.BlurLevel
 import com.lumen.messages.data.BubbleShape
@@ -88,7 +95,7 @@ fun SettingsScreen(vm: AppViewModel, onRequestDefault: () -> Unit) {
             modifier = Modifier.fillMaxSize().backdropSource(backdrop),
             contentPadding = PaddingValues(
                 top = with(density) { headerPx.toDp() } + 12.dp,
-                bottom = navBottom + 32.dp,
+                bottom = navBottom + BottomBarSpace,
                 start = 14.dp, end = 14.dp,
             ),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -102,13 +109,7 @@ fun SettingsScreen(vm: AppViewModel, onRequestDefault: () -> Unit) {
                         Segmented(
                             options = ThemeMode.values().toList(),
                             selected = prefs.themeMode,
-                            label = {
-                                when (it) {
-                                    ThemeMode.System -> "Auto"
-                                    ThemeMode.Light -> "White"
-                                    ThemeMode.Dark -> "Black"
-                                }
-                            },
+                            label = { it.label },
                             onSelect = { prefs.themeMode = it },
                         )
                     }
@@ -157,6 +158,8 @@ fun SettingsScreen(vm: AppViewModel, onRequestDefault: () -> Unit) {
                     }
                 }
             }
+
+            item(key = "otp-help") { OtpHelp(isDefault = vm.isDefaultSms, onRequestDefault = onRequestDefault) }
 
             item(key = "notif-h") { SectionHeader("Customize notifications") }
             item(key = "notif") {
@@ -249,7 +252,7 @@ fun SettingsScreen(vm: AppViewModel, onRequestDefault: () -> Unit) {
             }
             item(key = "about") {
                 Text(
-                    "Lumen 1.1",
+                    "Lumen 1.2",
                     style = LType.micro.copy(color = p.textFaint),
                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -259,17 +262,18 @@ fun SettingsScreen(vm: AppViewModel, onRequestDefault: () -> Unit) {
 
         GlassSurface(
             modifier = Modifier.fillMaxWidth().onSizeChanged { headerPx = it.height },
-            shape = RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp),
+            shape = RoundedCornerShape(0.dp),
             backdrop = backdrop,
             tint = p.barTint,
+            border = false,
+            sheen = false,
         ) {
             Row(
                 Modifier.statusBarsPadding().padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                GlassIconButton(Icons.AutoMirrored.Rounded.ArrowBack, "Back", onClick = { vm.back() }, size = 42.dp)
-                Spacer(Modifier.width(12.dp))
-                Text("Settings", style = LType.title.copy(color = p.text))
+                Spacer(Modifier.width(8.dp))
+                Text("Settings", style = LType.hero.copy(color = p.text, fontSize = 30.sp))
             }
         }
     }
@@ -408,8 +412,8 @@ private fun ChatPreview() {
                 val m = Modifier.widthIn(max = 260.dp).clip(shape)
                 Box(
                     when (look.bubbleStyle) {
-                        BubbleStyle.Solid -> m.background(p.accentA)
-                        BubbleStyle.Gradient -> m.background(Brush.verticalGradient(listOf(p.accentB, p.accentA, p.accentC)))
+                        BubbleStyle.Ink -> m.background(p.ink).border(1.dp, p.glassEdgeDark, shape)
+                        BubbleStyle.Accent -> m.background(p.accentA)
                         BubbleStyle.Glass -> m
                             .background(p.accentA.copy(alpha = if (p.dark) 0.26f else 0.16f))
                             .border(1.dp, p.accentB.copy(alpha = 0.6f), shape)
@@ -417,10 +421,97 @@ private fun ChatPreview() {
                 ) {
                     Text(
                         "Yes, see you there 👍",
-                        style = LType.body.copy(color = if (look.bubbleStyle == BubbleStyle.Glass) p.text else Color.White),
+                        style = LType.body.copy(
+                            color = when (look.bubbleStyle) {
+                                BubbleStyle.Ink -> p.onInk
+                                BubbleStyle.Accent -> Color.White
+                                BubbleStyle.Glass -> p.text
+                            }
+                        ),
                     )
                 }
             }
         }
+    }
+}
+
+/** Explains the real reasons OTP texts can skip a third-party SMS app, with a fix for each. */
+@Composable
+private fun OtpHelp(isDefault: Boolean, onRequestDefault: () -> Unit) {
+    val p = LocalPalette.current
+    val context = LocalContext.current
+    var open by remember { mutableStateOf(false) }
+    val rotation by animateFloatAsState(if (open) 90f else 0f, label = "otpChev")
+    GlassSurface(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), shape = RoundedCornerShape(24.dp)) {
+        Column {
+            Row(
+                Modifier.fillMaxWidth().clickable { open = !open }.padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Not getting OTP messages?", style = LType.name.copy(color = p.text, fontWeight = FontWeight.Medium))
+                    Text("Three things to check", style = LType.caption.copy(color = p.textDim, fontWeight = FontWeight.Normal))
+                }
+                Icon(
+                    Icons.Rounded.ChevronRight, null, tint = p.textDim,
+                    modifier = Modifier.graphicsLayer { rotationZ = rotation },
+                )
+            }
+            AnimatedVisibility(open, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+                Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
+                    HelpStep(
+                        1,
+                        if (isDefault) "Lumen is your default SMS app ✓"
+                        else "Make Lumen your default SMS app. Android 15+ hides OTP texts from other apps for 3 hours.",
+                    )
+                    if (!isDefault) {
+                        Box(
+                            Modifier
+                                .padding(start = 30.dp, top = 4.dp, bottom = 6.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(p.chipActive)
+                                .clickable(onClick = onRequestDefault)
+                                .padding(horizontal = 14.dp, vertical = 8.dp)
+                        ) { Text("Set default", style = LType.button.copy(color = p.onChipActive, fontSize = 14.sp)) }
+                    }
+                    HelpStep(
+                        2,
+                        "Turn off RCS chats in Google Messages (Settings → RCS chats → off). Many banks now send OTPs as RCS, " +
+                            "which only Google Messages can receive. With RCS off they arrive as normal SMS.",
+                    )
+                    val gm = remember {
+                        context.packageManager.getLaunchIntentForPackage("com.google.android.apps.messaging")
+                    }
+                    if (gm != null) {
+                        Box(
+                            Modifier
+                                .padding(start = 30.dp, top = 4.dp, bottom = 6.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(p.chipActive)
+                                .clickable { runCatching { context.startActivity(gm) } }
+                                .padding(horizontal = 14.dp, vertical = 8.dp)
+                        ) { Text("Open Google Messages", style = LType.button.copy(color = p.onChipActive, fontSize = 14.sp)) }
+                    }
+                    HelpStep(
+                        3,
+                        "On OnePlus, Oppo, Realme, Vivo or Xiaomi phones, turn off \u201cVerification code protection\u201d " +
+                            "(Settings → Privacy, or Security → SMS) so it doesn't block OTPs for other SMS apps.",
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HelpStep(n: Int, text: String) {
+    val p = LocalPalette.current
+    Row(Modifier.padding(vertical = 5.dp)) {
+        Box(
+            Modifier.size(20.dp).clip(CircleShape).background(p.accentA),
+            contentAlignment = Alignment.Center,
+        ) { Text("$n", style = LType.micro.copy(color = Color.White, fontWeight = FontWeight.Bold)) }
+        Spacer(Modifier.width(10.dp))
+        Text(text, style = LType.caption.copy(color = p.textDim, fontWeight = FontWeight.Normal))
     }
 }

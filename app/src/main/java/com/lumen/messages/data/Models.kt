@@ -99,3 +99,12 @@ data class SearchHit(
     val body: String,
     val date: Long,
 )
+
+data class ThreadStats(
+    val total: Int,
+    val sent: Int,
+    val received: Int,
+    val firstDate: Long,
+    val otps: Int,
+    val transactions: Int,
+)

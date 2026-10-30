@@ -11,6 +11,11 @@ data class DayRow(val day: LocalDate) : ChatRow {
     override val key: String = "day-${day.toEpochDay()}"
 }
 
+/** Centered time marker between messages far apart in time, like "8:16 PM" in the reference. */
+data class TimeRow(val time: Long) : ChatRow {
+    override val key: String = "time-$time"
+}
+
 data class MsgRow(
     val msg: Message,
     val groupTop: Boolean,
@@ -21,6 +26,7 @@ data class MsgRow(
 }
 
 private const val GROUP_GAP_MS = 3 * 60 * 1000L
+private const val TIME_GAP_MS = 60 * 60 * 1000L
 
 /**
  * Builds rows newest-first (for a bottom-anchored list) with day separators and bubble grouping.
@@ -39,6 +45,7 @@ fun buildRows(messages: List<Message>): List<ChatRow> {
         }
         val prev = messages.getOrNull(i - 1)
         val next = messages.getOrNull(i + 1)
+        if (prev != null && days[i - 1] == day && m.date - prev.date > TIME_GAP_MS) rows += TimeRow(m.date)
         val top = prev == null || prev.isMine != m.isMine || m.date - prev.date > GROUP_GAP_MS || days[i - 1] != day
         val bottom = next == null || next.isMine != m.isMine || next.date - m.date > GROUP_GAP_MS || days[i + 1] != day
         rows += MsgRow(m, top, bottom, if (m.isMine) null else findOtp(m.body))

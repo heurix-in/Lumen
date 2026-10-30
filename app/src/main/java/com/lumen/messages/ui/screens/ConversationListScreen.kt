@@ -8,33 +8,30 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
-import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -45,21 +42,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.border
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.ui.unit.sp
-import androidx.compose.material.icons.rounded.AccountBalanceWallet
-import androidx.compose.material.icons.rounded.Settings
-import com.lumen.messages.ui.ListFilter
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -67,11 +57,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DoneAll
-import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Search
@@ -90,27 +80,27 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.lumen.messages.data.Category
 import com.lumen.messages.data.Conversation
 import com.lumen.messages.data.SearchHit
 import com.lumen.messages.ui.AppViewModel
 import com.lumen.messages.ui.Fmt
+import com.lumen.messages.ui.ListFilter
 import com.lumen.messages.ui.components.Avatar
 import com.lumen.messages.ui.components.CountBadge
 import com.lumen.messages.ui.components.GlassIconButton
@@ -125,6 +115,9 @@ import com.lumen.messages.ui.theme.LocalPalette
 import kotlinx.coroutines.delay
 
 private enum class HeaderMode { Normal, Search, Select }
+
+/** Space reserved at the bottom for the floating tab bar. */
+val BottomBarSpace = 96.dp
 
 @Composable
 fun ConversationListScreen(
@@ -155,57 +148,55 @@ fun ConversationListScreen(
         }
     }
 
+    val filters = if (vm.prefs.smartTabs) ListFilter.values().toList() else listOf(ListFilter.All, ListFilter.Unread)
     val visible = remember(vm.conversations, vm.query, vm.filter, vm.prefs.smartTabs) {
         vm.conversations.filter { c ->
-            (!vm.prefs.smartTabs && vm.filter != ListFilter.Unread || vm.matchesFilter(c)) &&
-                (vm.query.isBlank() ||
-                    c.title.contains(vm.query, true) ||
-                    c.address.contains(vm.query, true))
+            (vm.filter !in filters || vm.matchesFilter(c)) &&
+                (vm.query.isBlank() || c.title.contains(vm.query, true) || c.address.contains(vm.query, true))
         }
+    }
+    val people = remember(vm.conversations) {
+        vm.conversations.filter { it.category == Category.Personal }.take(12)
     }
     val hits = if (vm.query.isNotBlank()) vm.searchHits else emptyList()
-
-
-    val collapse by remember {
-        derivedStateOf {
-            if (listState.firstVisibleItemIndex > 0) 1f
-            else (listState.firstVisibleItemScrollOffset / 140f).coerceIn(0f, 1f)
-        }
-    }
-    val fabExpanded by remember { derivedStateOf { !listState.canScrollBackward } }
+    val scrolled by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 8 } }
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
             state = listState,
-            modifier = Modifier
-                .fillMaxSize()
-                .backdropSource(backdrop),
+            modifier = Modifier.fillMaxSize().backdropSource(backdrop),
             contentPadding = PaddingValues(
-                top = with(density) { headerHeightPx.toDp() } + 10.dp,
-                bottom = navBottom + 110.dp,
-                start = 14.dp,
-                end = 14.dp,
+                top = with(density) { headerHeightPx.toDp() } + 4.dp,
+                bottom = navBottom + BottomBarSpace,
             ),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            if (people.size >= 2 && mode == HeaderMode.Normal && vm.filter == ListFilter.All) {
+                item(key = "people") {
+                    PeopleRow(
+                        people = people,
+                        onNew = { vm.openNewMessage() },
+                        onOpen = { vm.openConversation(it) },
+                        modifier = Modifier.animateItem(),
+                    )
+                }
+            }
             if (!vm.isDefaultSms && vm.query.isBlank()) {
                 item(key = "banner") {
-                    DefaultAppBanner(onRequestDefault, Modifier.animateItem())
+                    DefaultAppBanner(onRequestDefault, Modifier.padding(horizontal = 14.dp, vertical = 6.dp).animateItem())
                 }
             }
             if (vm.filter == ListFilter.Transactions && vm.query.isBlank() && vm.transactions.isNotEmpty()) {
                 item(key = "money-teaser") {
-                    MoneyTeaser(vm, Modifier.animateItem())
+                    MoneyTeaser(vm, Modifier.padding(horizontal = 14.dp, vertical = 6.dp).animateItem())
                 }
             }
-            itemsIndexed(visible, key = { _, c -> c.threadId }, contentType = { _, _ -> "conv" }) { index, conv ->
-                ConversationCard(
+            itemsIndexed(visible, key = { _, c -> c.threadId }, contentType = { _, _ -> "conv" }) { _, conv ->
+                ConversationRow(
                     conv = conv,
                     query = vm.query,
                     selected = conv.threadId in vm.selection,
                     selectionMode = vm.selection.isNotEmpty(),
-                    entranceDelayIndex = -1,
                     sharedScope = sharedScope,
                     animScope = animScope,
                     onClick = {
@@ -220,21 +211,21 @@ fun ConversationListScreen(
                     },
                     modifier = Modifier.animateItem(
                         fadeInSpec = spring(stiffness = Spring.StiffnessMediumLow),
-                        placementSpec = spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow),
-                        fadeOutSpec = tween(180),
+                        placementSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMediumLow),
+                        fadeOutSpec = tween(160),
                     ),
                 )
             }
             if (hits.isNotEmpty()) {
                 item(key = "hits-header") {
                     Text(
-                        "In messages",
-                        style = LType.caption.copy(color = p.textDim),
-                        modifier = Modifier.padding(start = 8.dp, top = 12.dp, bottom = 2.dp).animateItem(),
+                        "IN MESSAGES",
+                        style = LType.section.copy(color = p.textFaint),
+                        modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 6.dp).animateItem(),
                     )
                 }
                 items(hits, key = { "hit-${it.messageId}" }) { hit ->
-                    SearchHitCard(hit, vm.query, onClick = { vm.openThreadById(hit.threadId) }, modifier = Modifier.animateItem())
+                    SearchHitRow(hit, vm.query, onClick = { vm.openThreadById(hit.threadId) }, modifier = Modifier.animateItem())
                 }
             }
         }
@@ -242,7 +233,7 @@ fun ConversationListScreen(
         val empty = vm.conversationsLoaded && visible.isEmpty() && hits.isEmpty()
         AnimatedVisibility(
             visible = empty,
-            enter = fadeIn(tween(400)) + scaleIn(initialScale = 0.9f),
+            enter = fadeIn(tween(400)) + scaleIn(initialScale = 0.92f),
             exit = fadeOut(tween(150)),
             modifier = Modifier.align(Alignment.Center),
         ) {
@@ -250,57 +241,49 @@ fun ConversationListScreen(
                 title = when {
                     vm.query.isNotBlank() -> "No matches"
                     vm.filter == ListFilter.Unread -> "All caught up"
+                    vm.filter != ListFilter.All -> "No ${vm.filter.label.lowercase()} yet"
                     else -> "No conversations yet"
                 },
                 subtitle = when {
                     vm.query.isNotBlank() -> "Nothing found for “${vm.query}”"
-                    vm.filter != ListFilter.All -> "Nothing in ${vm.filter.label} yet."
-                    else -> "Tap New chat to send your first message."
+                    vm.filter == ListFilter.Unread -> "You've read everything."
+                    vm.filter == ListFilter.Otp -> "Not getting OTPs? Open Settings → \u201cNot getting OTP messages?\u201d"
+                    else -> "Tap + to send a message."
                 },
             )
         }
 
         // ---------------------------------------------------------- glass header
+        val headerTint by animateColorAsState(
+            if (scrolled) p.barTint else p.barTint.copy(alpha = 0f), tween(250), label = "hdr",
+        )
         GlassSurface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .onSizeChanged { headerHeightPx = it.height },
-            shape = RoundedCornerShape(bottomStart = 30.dp, bottomEnd = 30.dp),
+            modifier = Modifier.fillMaxWidth().onSizeChanged { headerHeightPx = it.height },
+            shape = RoundedCornerShape(0.dp),
             backdrop = backdrop,
-            tint = p.barTint.copy(alpha = p.barTint.alpha * (0.55f + 0.45f * collapse)),
+            tint = headerTint,
+            border = false,
+            sheen = false,
         ) {
-            Column(
-                Modifier
-                    .statusBarsPadding()
-                    .padding(start = 18.dp, end = 14.dp, top = 6.dp, bottom = 12.dp)
-            ) {
+            Column(Modifier.statusBarsPadding().padding(top = 6.dp, bottom = 10.dp)) {
                 AnimatedContent(
                     targetState = mode,
                     transitionSpec = {
-                        (fadeIn(tween(220, delayMillis = 60)) + slideInVertically(spring(0.8f, 500f)) { it / 3 })
+                        (fadeIn(tween(220, delayMillis = 60)) + slideInVertically(spring(0.85f, 500f)) { it / 3 })
                             .togetherWith(fadeOut(tween(120)) + slideOutVertically(tween(160)) { -it / 3 })
                     },
                     label = "header",
                 ) { m ->
-                    Box(Modifier.fillMaxWidth().height(58.dp), contentAlignment = Alignment.CenterStart) {
+                    Box(
+                        Modifier.fillMaxWidth().height(56.dp).padding(start = 20.dp, end = 14.dp),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
                         when (m) {
                             HeaderMode.Normal -> Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    "Messages",
-                                    style = LType.hero.copy(color = p.text),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .graphicsLayer {
-                                            val s = 1f - 0.22f * collapse
-                                            scaleX = s; scaleY = s
-                                            transformOrigin = TransformOrigin(0f, 0.5f)
-                                        },
-                                )
-                                GlassIconButton(Icons.Rounded.AccountBalanceWallet, "Money", onClick = vm::openMoney, size = 40.dp)
-                                Spacer(Modifier.width(8.dp))
-                                GlassIconButton(Icons.Rounded.Search, "Search", onClick = { searchOpen = true }, size = 40.dp)
-                                Spacer(Modifier.width(8.dp))
-                                GlassIconButton(Icons.Rounded.Settings, "Settings", onClick = vm::openSettings, size = 40.dp)
+                                Text("Chats", style = LType.hero.copy(color = p.text, fontSize = 30.sp), modifier = Modifier.weight(1f))
+                                GlassIconButton(Icons.Rounded.Search, "Search", onClick = { searchOpen = true }, size = 42.dp)
+                                Spacer(Modifier.width(10.dp))
+                                GlassIconButton(Icons.Rounded.DoneAll, "Mark all as read", onClick = vm::markAllRead, size = 42.dp)
                             }
                             HeaderMode.Search -> SearchField(
                                 query = vm.query,
@@ -336,9 +319,9 @@ fun ConversationListScreen(
                         }
                     }
                 }
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(8.dp))
                 FilterChips(
-                    filters = if (vm.prefs.smartTabs) ListFilter.values().toList() else listOf(ListFilter.All, ListFilter.Unread),
+                    filters = filters,
                     selected = vm.filter,
                     countFor = vm::countFor,
                     onSelect = {
@@ -347,19 +330,6 @@ fun ConversationListScreen(
                     },
                 )
             }
-        }
-
-        // ---------------------------------------------------------- floating new-chat button
-        AnimatedVisibility(
-            visible = mode != HeaderMode.Select,
-            enter = scaleIn(spring(0.6f, 400f)) + fadeIn(),
-            exit = scaleOut(tween(150)) + fadeOut(tween(150)),
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .navigationBarsPadding()
-                .padding(20.dp),
-        ) {
-            NewChatButton(expanded = fabExpanded, onClick = { vm.openNewMessage() })
         }
 
         GlassConfirm(
@@ -387,10 +357,9 @@ private fun SearchField(query: String, onQuery: (String) -> Unit, onClose: () ->
         runCatching { focus.requestFocus() }
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
-        GlassSurface(
-            modifier = Modifier.weight(1f).height(48.dp),
-            shape = RoundedCornerShape(24.dp),
-        ) {
+        GlassIconButton(Icons.AutoMirrored.Rounded.ArrowBack, "Close search", onClick = onClose, size = 42.dp)
+        Spacer(Modifier.width(10.dp))
+        GlassSurface(modifier = Modifier.weight(1f).height(46.dp), shape = RoundedCornerShape(23.dp)) {
             Row(
                 Modifier.fillMaxSize().padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -414,20 +383,15 @@ private fun SearchField(query: String, onQuery: (String) -> Unit, onClose: () ->
                     Icon(
                         Icons.Rounded.Close, "Clear",
                         tint = p.textDim,
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clip(CircleShape)
-                            .clickable { onQuery("") }
-                            .padding(4.dp),
+                        modifier = Modifier.size(28.dp).clip(CircleShape).clickable { onQuery("") }.padding(4.dp),
                     )
                 }
             }
         }
-        Spacer(Modifier.width(10.dp))
-        GlassIconButton(Icons.AutoMirrored.Rounded.ArrowBack, "Close search", onClick = onClose)
     }
 }
 
+/** Pill filters like the reference: light pill when selected, dark glass otherwise. */
 @Composable
 private fun FilterChips(
     filters: List<ListFilter>,
@@ -438,49 +402,41 @@ private fun FilterChips(
     val p = LocalPalette.current
     LazyRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
         items(filters, key = { it.name }) { f ->
             val active = f == selected
-            val fill by animateColorAsState(
-                if (active) p.accentA else p.glassTint,
-                animationSpec = spring(stiffness = 600f),
-                label = "chip",
-            )
-            val scale by animateFloatAsState(if (active) 1f else 0.96f, spring(0.5f, 600f), label = "chipScale")
+            val fill by animateColorAsState(if (active) p.chipActive else p.glassTint, spring(stiffness = 600f), label = "chip")
+            val scale by animateFloatAsState(if (active) 1f else 0.97f, spring(0.5f, 600f), label = "chipScale")
             val count = countFor(f)
-            Box(
+            Row(
                 Modifier
                     .graphicsLayer { scaleX = scale; scaleY = scale }
-                    .clip(RoundedCornerShape(18.dp))
+                    .clip(RoundedCornerShape(17.dp))
                     .background(fill)
-                    .border(1.dp, if (active) Color.Transparent else p.glassEdgeLight, RoundedCornerShape(18.dp))
+                    .border(1.dp, if (active) Color.Transparent else p.glassEdgeDark, RoundedCornerShape(17.dp))
                     .clickable { onSelect(f) }
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                contentAlignment = Alignment.Center,
+                    .padding(horizontal = 15.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        f.label,
-                        style = LType.button.copy(
-                            fontSize = 14.sp,
-                            color = if (active) p.onAccent else p.text,
-                            fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                        ),
-                    )
-                    if (count > 0) {
-                        Spacer(Modifier.width(6.dp))
-                        Box(
-                            Modifier
-                                .clip(CircleShape)
-                                .background(if (active) Color.White.copy(alpha = 0.25f) else p.accentA)
-                                .padding(horizontal = 6.dp, vertical = 1.dp)
-                        ) {
-                            Text(
-                                if (count > 99) "99+" else "$count",
-                                style = LType.micro.copy(color = Color.White, fontWeight = FontWeight.Bold),
-                            )
-                        }
+                Text(
+                    f.label,
+                    style = LType.button.copy(
+                        fontSize = 13.5.sp,
+                        color = if (active) p.onChipActive else p.textDim,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+                    ),
+                )
+                if (count > 0) {
+                    Spacer(Modifier.width(6.dp))
+                    Box(
+                        Modifier.clip(CircleShape).background(p.badge).padding(horizontal = 5.dp, vertical = 1.dp)
+                    ) {
+                        Text(
+                            if (count > 99) "99+" else "$count",
+                            style = LType.micro.copy(color = Color.White, fontWeight = FontWeight.Bold, fontSize = 10.sp),
+                        )
                     }
                 }
             }
@@ -488,13 +444,78 @@ private fun FilterChips(
     }
 }
 
+/** Contact tiles row, like the stories row in the reference. */
 @Composable
-private fun ConversationCard(
+private fun PeopleRow(
+    people: List<Conversation>,
+    onNew: () -> Unit,
+    onOpen: (Conversation) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val p = LocalPalette.current
+    val tile = RoundedCornerShape(18.dp)
+    LazyRow(
+        modifier = modifier.fillMaxWidth().padding(top = 6.dp, bottom = 10.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item(key = "new") {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(62.dp)) {
+                val interaction = remember { MutableInteractionSource() }
+                GlassSurface(
+                    modifier = Modifier.size(62.dp).pressScale(interaction, 0.9f),
+                    shape = tile,
+                ) {
+                    Box(
+                        Modifier.fillMaxSize().clickable(interaction, ripple(color = p.text), onClick = onNew),
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(Icons.Rounded.Add, "New message", tint = p.text, modifier = Modifier.size(26.dp)) }
+                }
+                Spacer(Modifier.height(6.dp))
+                Text("New", style = LType.micro.copy(color = p.textDim))
+            }
+        }
+        items(people, key = { "pp-${it.threadId}" }) { c ->
+            val interaction = remember { MutableInteractionSource() }
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(62.dp)) {
+                Box(
+                    Modifier
+                        .size(62.dp)
+                        .pressScale(interaction, 0.9f)
+                        .clickable(interaction, null) { onOpen(c) }
+                ) {
+                    Avatar(
+                        name = c.name, address = c.address, photoUri = c.photoUri,
+                        size = 62.dp, shape = tile,
+                        modifier = Modifier.border(
+                            1.5.dp,
+                            if (c.unread > 0) p.accentA else p.glassEdgeLight,
+                            tile,
+                        ),
+                    )
+                    if (c.unread > 0) {
+                        CountBadge(c.unread, Modifier.align(Alignment.TopEnd).offset(x = 5.dp, y = (-5).dp))
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    (c.name ?: c.address).substringBefore(' '),
+                    style = LType.micro.copy(color = p.textDim),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConversationRow(
     conv: Conversation,
     query: String,
     selected: Boolean,
     selectionMode: Boolean,
-    entranceDelayIndex: Int,
     sharedScope: SharedTransitionScope,
     animScope: AnimatedVisibilityScope,
     onClick: () -> Unit,
@@ -504,97 +525,84 @@ private fun ConversationCard(
     val p = LocalPalette.current
     val context = LocalContext.current
     val interaction = remember { MutableInteractionSource() }
-    val appear = remember { Animatable(if (entranceDelayIndex >= 0) 0f else 1f) }
-    LaunchedEffect(Unit) {
-        if (appear.value < 1f) {
-            delay(entranceDelayIndex.coerceAtMost(10) * 45L)
-            appear.animateTo(1f, spring(dampingRatio = 0.78f, stiffness = 260f))
-        }
-    }
     val unread = conv.unread > 0
-    val tint by animateFloatAsState(if (selected) 1f else 0f, label = "selTint")
+    val bg by animateColorAsState(if (selected) p.chipActive.copy(alpha = 0.18f) else Color.Transparent, label = "selBg")
 
-    GlassSurface(
-        modifier = modifier
+    Row(
+        modifier
             .fillMaxWidth()
-            .graphicsLayer {
-                val v = appear.value
-                alpha = v.coerceIn(0f, 1f)
-                translationY = (1f - v) * 60.dp.toPx()
-                scaleX = 0.94f + 0.06f * v
-                scaleY = 0.94f + 0.06f * v
-            }
-            .pressScale(interaction, 0.975f),
-        shape = RoundedCornerShape(26.dp),
-        tint = lerpColor(p.glassTint, p.accentA.copy(alpha = 0.24f), tint),
+            .padding(horizontal = 8.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(bg)
+            .combinedClickable(
+                interactionSource = interaction,
+                indication = ripple(color = p.text),
+                onLongClick = onLongClick,
+                onClick = onClick,
+            )
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .combinedClickable(
-                    interactionSource = interaction,
-                    indication = ripple(color = p.text),
-                    onLongClick = onLongClick,
-                    onClick = onClick,
+        with(sharedScope) {
+            Avatar(
+                name = conv.name,
+                address = conv.address,
+                photoUri = conv.photoUri,
+                size = 50.dp,
+                selected = selected,
+                modifier = Modifier.sharedElement(
+                    rememberSharedContentState(key = "avatar-${conv.threadId}"),
+                    animatedVisibilityScope = animScope,
+                ),
+            )
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    highlight(conv.title, query, p.accentA),
+                    style = LType.name.copy(color = p.text, fontWeight = if (unread) FontWeight.Bold else FontWeight.SemiBold),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
-                .padding(horizontal = 14.dp, vertical = 13.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            with(sharedScope) {
-                Avatar(
-                    name = conv.name,
-                    address = conv.address,
-                    photoUri = conv.photoUri,
-                    size = 52.dp,
-                    selected = selected,
-                    modifier = Modifier.sharedElement(
-                        rememberSharedContentState(key = "avatar-${conv.threadId}"),
-                        animatedVisibilityScope = animScope,
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    Fmt.listTime(context, conv.date),
+                    style = LType.caption.copy(
+                        color = if (unread) p.text else p.textFaint,
+                        fontWeight = if (unread) FontWeight.SemiBold else FontWeight.Medium,
                     ),
                 )
             }
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        highlight(conv.title, query, p.accentB),
-                        style = LType.name.copy(
-                            color = p.text,
-                            fontWeight = if (unread) FontWeight.Bold else FontWeight.SemiBold,
-                        ),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        Fmt.listTime(context, conv.date),
-                        style = LType.caption.copy(color = if (unread) p.accentB else p.textFaint),
-                    )
-                }
-                Spacer(Modifier.height(3.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (conv.lastFailed) {
+            Spacer(Modifier.height(3.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                when {
+                    conv.lastFailed -> {
                         Icon(Icons.Rounded.ErrorOutline, "Not sent", tint = p.danger, modifier = Modifier.size(15.dp))
                         Spacer(Modifier.width(4.dp))
                     }
-                    Text(
-                        (if (conv.lastFromMe) "You: " else "") + conv.snippet.replace('\n', ' '),
-                        style = LType.snippet.copy(
-                            color = if (unread) p.text.copy(alpha = 0.86f) else p.textDim,
-                            fontWeight = if (unread) FontWeight.Medium else FontWeight.Normal,
-                        ),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    AnimatedVisibility(
-                        visible = unread && !selectionMode,
-                        enter = scaleIn(spring(0.45f, 500f)) + fadeIn(),
-                        exit = scaleOut() + fadeOut(),
-                    ) {
-                        PulsingBadge(conv.unread, Modifier.padding(start = 10.dp))
+                    conv.lastFromMe -> {
+                        Icon(Icons.Rounded.DoneAll, null, tint = p.textFaint, modifier = Modifier.size(15.dp))
+                        Spacer(Modifier.width(4.dp))
                     }
+                }
+                Text(
+                    conv.snippet.replace('\n', ' '),
+                    style = LType.snippet.copy(
+                        color = if (unread) p.text.copy(alpha = 0.85f) else p.textDim,
+                        fontWeight = if (unread) FontWeight.Medium else FontWeight.Normal,
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                AnimatedVisibility(
+                    visible = unread && !selectionMode,
+                    enter = scaleIn(spring(0.45f, 500f)) + fadeIn(),
+                    exit = scaleOut() + fadeOut(),
+                ) {
+                    CountBadge(conv.unread, Modifier.padding(start = 10.dp))
                 }
             }
         }
@@ -602,49 +610,37 @@ private fun ConversationCard(
 }
 
 @Composable
-private fun PulsingBadge(count: Int, modifier: Modifier = Modifier) {
-    val pulse = rememberInfiniteTransition(label = "pulse")
-    val s by pulse.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.1f,
-        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
-        label = "s",
-    )
-    CountBadge(count, modifier.graphicsLayer { scaleX = s; scaleY = s })
-}
-
-@Composable
-private fun SearchHitCard(hit: SearchHit, query: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun SearchHitRow(hit: SearchHit, query: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val p = LocalPalette.current
     val context = LocalContext.current
-    GlassSurface(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp)) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onClick)
-                .padding(14.dp),
-            verticalAlignment = Alignment.Top,
-        ) {
-            Avatar(hit.name, hit.address, null, 38.dp)
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Row {
-                    Text(
-                        hit.name ?: hit.address,
-                        style = LType.name.copy(color = p.text),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(Fmt.listTime(context, hit.date), style = LType.caption.copy(color = p.textFaint))
-                }
+    Row(
+        modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Avatar(hit.name, hit.address, null, 40.dp)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Row {
                 Text(
-                    highlight(excerpt(hit.body, query), query, p.accentB),
-                    style = LType.snippet.copy(color = p.textDim),
-                    maxLines = 3,
+                    hit.name ?: hit.address,
+                    style = LType.name.copy(color = p.text),
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
+                Text(Fmt.listTime(context, hit.date), style = LType.caption.copy(color = p.textFaint))
             }
+            Text(
+                highlight(excerpt(hit.body, query), query, p.accentA),
+                style = LType.snippet.copy(color = p.textDim),
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -652,21 +648,17 @@ private fun SearchHitCard(hit: SearchHit, query: String, onClick: () -> Unit, mo
 @Composable
 private fun DefaultAppBanner(onRequestDefault: () -> Unit, modifier: Modifier = Modifier) {
     val p = LocalPalette.current
-    GlassSurface(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        tint = p.accentA.copy(alpha = if (p.dark) 0.16f else 0.12f),
-    ) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+    GlassSurface(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(22.dp)) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
-                Modifier.size(40.dp).clip(CircleShape).background(p.accentBrush),
+                Modifier.size(38.dp).clip(CircleShape).background(p.accentA),
                 contentAlignment = Alignment.Center,
-            ) { Icon(Icons.Rounded.Sms, null, tint = Color.White, modifier = Modifier.size(22.dp)) }
+            ) { Icon(Icons.Rounded.Sms, null, tint = Color.White, modifier = Modifier.size(20.dp)) }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text("Not your default SMS app", style = LType.name.copy(color = p.text))
                 Text(
-                    "New texts go to your other app until you switch.",
+                    "OTPs and new texts won't arrive here until you switch.",
                     style = LType.caption.copy(color = p.textDim, fontWeight = FontWeight.Normal),
                 )
             }
@@ -674,42 +666,10 @@ private fun DefaultAppBanner(onRequestDefault: () -> Unit, modifier: Modifier = 
             Box(
                 Modifier
                     .clip(RoundedCornerShape(16.dp))
-                    .background(p.accentBrush)
+                    .background(p.chipActive)
                     .clickable(onClick = onRequestDefault)
                     .padding(horizontal = 14.dp, vertical = 9.dp)
-            ) { Text("Switch", style = LType.button.copy(color = p.onAccent)) }
-        }
-    }
-}
-
-@Composable
-private fun NewChatButton(expanded: Boolean, onClick: () -> Unit) {
-    val p = LocalPalette.current
-    val interaction = remember { MutableInteractionSource() }
-    Box(
-        Modifier
-            .pressScale(interaction, 0.9f)
-            .shadow(22.dp, RoundedCornerShape(30.dp), ambientColor = p.accentA, spotColor = p.accentA)
-            .clip(RoundedCornerShape(30.dp))
-            .background(Brush.linearGradient(listOf(p.accentC, p.accentA, p.accentB)))
-            .clickable(interactionSource = interaction, indication = ripple(color = Color.White), onClick = onClick)
-            .height(60.dp)
-            .padding(horizontal = 20.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Rounded.Edit, "New chat", tint = Color.White, modifier = Modifier.size(24.dp))
-            AnimatedVisibility(
-                visible = expanded,
-                enter = fadeIn(tween(200, 80)) + expandHorizontally(spring(0.8f, 450f)),
-                exit = fadeOut(tween(100)) + shrinkHorizontally(spring(0.9f, 500f)),
-            ) {
-                Text(
-                    "New chat",
-                    style = LType.button.copy(color = Color.White, fontWeight = FontWeight.Bold),
-                    modifier = Modifier.padding(start = 10.dp),
-                )
-            }
+            ) { Text("Switch", style = LType.button.copy(color = p.onChipActive)) }
         }
     }
 }
@@ -719,31 +679,25 @@ fun EmptyState(title: String, subtitle: String) {
     val p = LocalPalette.current
     val float = rememberInfiniteTransition(label = "float")
     val y by float.animateFloat(
-        initialValue = -8f, targetValue = 8f,
-        animationSpec = infiniteRepeatable(tween(2200), RepeatMode.Reverse), label = "y",
-    )
-    val rot by float.animateFloat(
         initialValue = -6f, targetValue = 6f,
-        animationSpec = infiniteRepeatable(tween(3100), RepeatMode.Reverse), label = "r",
+        animationSpec = infiniteRepeatable(tween(2200), RepeatMode.Reverse), label = "y",
     )
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
         GlassSurface(
-            modifier = Modifier
-                .size(96.dp)
-                .graphicsLayer { translationY = y.dp.toPx(); rotationZ = rot },
-            shape = RoundedCornerShape(32.dp),
+            modifier = Modifier.size(84.dp).graphicsLayer { translationY = y.dp.toPx() },
+            shape = RoundedCornerShape(28.dp),
         ) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.ChatBubbleOutline, null, tint = p.accentB, modifier = Modifier.size(42.dp))
+                Icon(Icons.Rounded.ChatBubbleOutline, null, tint = p.text, modifier = Modifier.size(36.dp))
             }
         }
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(18.dp))
         Text(title, style = LType.title.copy(color = p.text))
         Spacer(Modifier.height(6.dp))
-        Text(subtitle, style = LType.snippet.copy(color = p.textDim))
-        Spacer(Modifier.height(18.dp))
+        Text(subtitle, style = LType.snippet.copy(color = p.textDim), textAlign = TextAlign.Center)
+        Spacer(Modifier.height(16.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Rounded.Lock, null, tint = p.textFaint, modifier = Modifier.size(13.dp))
+            Icon(Icons.Rounded.Lock, null, tint = p.textFaint, modifier = Modifier.size(12.dp))
             Spacer(Modifier.width(5.dp))
             Text("No internet access · messages stay on this phone", style = LType.micro.copy(color = p.textFaint))
         }

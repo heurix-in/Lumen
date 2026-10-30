@@ -199,7 +199,7 @@ fun MoneyScreen(vm: AppViewModel) {
             modifier = Modifier.fillMaxSize().backdropSource(backdrop),
             contentPadding = PaddingValues(
                 top = with(density) { headerPx.toDp() } + 12.dp,
-                bottom = navBottom + 32.dp,
+                bottom = navBottom + BottomBarSpace,
                 start = 14.dp, end = 14.dp,
             ),
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -303,18 +303,19 @@ fun MoneyScreen(vm: AppViewModel) {
 
         GlassSurface(
             modifier = Modifier.fillMaxWidth().onSizeChanged { headerPx = it.height },
-            shape = RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp),
+            shape = RoundedCornerShape(0.dp),
             backdrop = backdrop,
             tint = p.barTint,
+            border = false,
+            sheen = false,
         ) {
             Row(
                 Modifier.statusBarsPadding().padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                GlassIconButton(Icons.AutoMirrored.Rounded.ArrowBack, "Back", onClick = { vm.back() }, size = 42.dp)
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Money", style = LType.title.copy(color = p.text))
+                    Text("Money", style = LType.hero.copy(color = p.text, fontSize = 30.sp))
                     Text(
                         "Bank transfers from your SMS",
                         style = LType.caption.copy(color = p.textDim, fontWeight = FontWeight.Normal),

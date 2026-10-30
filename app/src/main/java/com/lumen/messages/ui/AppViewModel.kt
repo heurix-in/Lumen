@@ -19,6 +19,7 @@ import com.lumen.messages.data.SearchHit
 import com.lumen.messages.data.SimInfo
 import com.lumen.messages.data.SmsRepository
 import com.lumen.messages.data.ThreadHeader
+import com.lumen.messages.data.ThreadStats
 import com.lumen.messages.data.Transaction
 import com.lumen.messages.lumen
 import com.lumen.messages.notify.Notifier
@@ -42,16 +43,21 @@ sealed interface Screen {
         override val depth = 1
     }
 
+    /** Tabs (Chats / Money / Settings) share depth 0 so switching between them cross-fades. */
     data object Money : Screen {
-        override val depth = 1
+        override val depth = 0
     }
 
     data object Settings : Screen {
-        override val depth = 1
+        override val depth = 0
     }
 
     data class Thread(val threadId: Long) : Screen {
         override val depth = 2
+    }
+
+    data class Contact(val threadId: Long) : Screen {
+        override val depth = 3
     }
 }
 
@@ -271,15 +277,49 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (draft.isNotBlank()) drafts[h.threadId] = draft else drafts.remove(h.threadId)
     }
 
-    fun openMoney() {
+    /** Bottom tab bar: each tab is a root; back from Money/Settings returns to Chats. */
+    fun selectTab(tab: Screen) {
         selection = emptySet()
-        push(Screen.Money)
-        if (!transactionsLoaded) loadTransactions()
+        stack.clear()
+        stack.add(Screen.List)
+        if (tab != Screen.List) stack.add(tab)
+        if (tab == Screen.Money && !transactionsLoaded) loadTransactions()
     }
 
-    fun openSettings() {
-        selection = emptySet()
-        push(Screen.Settings)
+    fun openMoney() = selectTab(Screen.Money)
+
+    fun openSettings() = selectTab(Screen.Settings)
+
+    // ------------------------------------------------------------ contact info
+    var contactStats by mutableStateOf<ThreadStats?>(null)
+        private set
+
+    fun openContact() {
+        val h = header ?: return
+        contactStats = null
+        stack.add(Screen.Contact(h.threadId))
+        viewModelScope.launch {
+            contactStats = withContext(Dispatchers.IO) { repo.threadStats(h.threadId) }
+        }
+    }
+
+    fun deleteCurrentThread() {
+        val h = header ?: return
+        conversations = conversations.filterNot { it.threadId == h.threadId }
+        viewModelScope.launch(Dispatchers.IO) { repo.deleteThreads(listOf(h.threadId)) }
+        stack.clear()
+        stack.add(Screen.List)
+    }
+
+    fun markAllRead() {
+        val ids = conversations.filter { it.unread > 0 }.map { it.threadId }
+        conversations = conversations.map { if (it.unread > 0) it.copy(unread = 0) else it }
+        viewModelScope.launch(Dispatchers.IO) {
+            ids.forEach {
+                repo.markRead(it)
+                Notifier.cancel(getApplication(), it)
+            }
+        }
     }
 
     fun openConversation(c: Conversation) {
