@@ -447,7 +447,12 @@ private fun MessageBubble(
                     transformOrigin = TransformOrigin(if (mine) 1f else 0f, 1f)
                 }
                 .pressScale(interaction, 0.97f)
-                .onGloballyPositioned { if (mine) yInWindow = it.positionInWindow().y }
+                .then(
+                    // Only the screen-pinned gradient needs the bubble's position each frame.
+                    if (mine && look.bubbleStyle == BubbleStyle.Gradient) {
+                        Modifier.onGloballyPositioned { yInWindow = it.positionInWindow().y }
+                    } else Modifier
+                )
                 .clip(shape)
                 .then(
                     if (glassMine) {

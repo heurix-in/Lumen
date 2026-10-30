@@ -179,14 +179,21 @@ private fun MainScreens(vm: AppViewModel, requestDefault: () -> Unit, requestCon
             targetState = vm.screen,
             transitionSpec = {
                 val push = targetState.depth > initialState.depth
+                // Shared-axis style: the new screen glides in, the old one eases back and dims.
                 val t: ContentTransform = if (push) {
-                    (fadeIn(tween(240, delayMillis = 40)) +
-                        slideInHorizontally(spring(dampingRatio = 0.86f, stiffness = 380f)) { it / 3 } +
-                        scaleIn(spring(0.9f, 380f), initialScale = 0.97f))
-                        .togetherWith(fadeOut(tween(220)) + scaleOut(tween(320), targetScale = 0.93f))
+                    (slideInHorizontally(spring(dampingRatio = 0.9f, stiffness = 420f)) { (it * 0.35f).toInt() } +
+                        fadeIn(tween(220, delayMillis = 30)))
+                        .togetherWith(
+                            slideOutHorizontally(spring(dampingRatio = 1f, stiffness = 420f)) { -(it * 0.12f).toInt() } +
+                                fadeOut(tween(180)) + scaleOut(tween(300), targetScale = 0.96f)
+                        )
                 } else {
-                    (fadeIn(tween(260)) + scaleIn(spring(0.9f, 340f), initialScale = 0.93f))
-                        .togetherWith(fadeOut(tween(180)) + slideOutHorizontally(tween(260)) { it / 3 })
+                    (slideInHorizontally(spring(dampingRatio = 1f, stiffness = 420f)) { -(it * 0.12f).toInt() } +
+                        fadeIn(tween(240)) + scaleIn(spring(0.9f, 420f), initialScale = 0.96f))
+                        .togetherWith(
+                            slideOutHorizontally(spring(dampingRatio = 0.9f, stiffness = 420f)) { (it * 0.35f).toInt() } +
+                                fadeOut(tween(160))
+                        )
                 }
                 t.targetContentZIndex = if (push) 1f else 0f
                 t.using(SizeTransform(clip = false))

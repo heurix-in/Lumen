@@ -12,8 +12,8 @@ android {
         applicationId = "com.lumen.messages"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
     }
 
     // A fixed key so every new build installs as an update over the previous one.
@@ -69,6 +69,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    // Installs Compose's ahead-of-time compilation profiles for sideloaded APKs -> smooth from first launch.
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
 
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
