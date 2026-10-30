@@ -15,9 +15,13 @@ import android.provider.ContactsContract
 import android.provider.Telephony
 import android.telephony.SubscriptionManager
 import androidx.core.content.ContextCompat
+import com.lumen.messages.ui.findOtp
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
 
 /**
  * All access to the phone's own SMS database. Nothing here touches the network:
@@ -28,10 +32,15 @@ class SmsRepository(private val context: Context) {
     private val cr get() = context.contentResolver
     val contacts = ContactResolver(context)
 
+    /** Threads known to contain bank transactions (filled by [scanTransactions]). */
+    @Volatile
+    var transactionThreads: Set<Long> = emptySet()
+
     companion object {
         val SMS_URI: Uri = Uri.parse("content://sms")
         val INBOX_URI: Uri = Uri.parse("content://sms/inbox")
         val OUTBOX_URI: Uri = Uri.parse("content://sms/outbox")
+        const val PAGE = 300
     }
 
     fun has(permission: String): Boolean =
@@ -67,7 +76,7 @@ class SmsRepository(private val context: Context) {
         awaitClose { registered.forEach { cr.unregisterContentObserver(it) } }
     }
 
-    // ---------------------------------------------------------------- reading
+    // ---------------------------------------------------------------- conversations
 
     private class ConvAcc(
         val threadId: Long,
@@ -81,13 +90,26 @@ class SmsRepository(private val context: Context) {
         var count = 1
     }
 
+    fun categorize(address: String, name: String?, snippet: String, threadId: Long): Category {
+        val business = address.any { it.isLetter() }
+        return when {
+            name != null && !business -> Category.Personal
+            findOtp(snippet) != null -> Category.Otp
+            threadId in transactionThreads -> Category.Transactions
+            business && BankParser.parse(0, threadId, address, snippet, 0) != null -> Category.Transactions
+            business -> Category.Updates
+            address.count { it.isDigit() } in 3..6 -> Category.Updates // short codes
+            else -> Category.Personal
+        }
+    }
+
     fun loadConversations(): List<Conversation> {
         if (!has(Manifest.permission.READ_SMS)) return emptyList()
         val acc = LinkedHashMap<Long, ConvAcc>()
         try {
             cr.query(
                 SMS_URI,
-                arrayOf(SmsCol.ID, SmsCol.THREAD_ID, SmsCol.ADDRESS, SmsCol.BODY, SmsCol.DATE, SmsCol.READ, SmsCol.TYPE),
+                arrayOf(SmsCol.THREAD_ID, SmsCol.ADDRESS, SmsCol.BODY, SmsCol.DATE, SmsCol.READ, SmsCol.TYPE),
                 null, null, "${SmsCol.DATE} DESC"
             )?.use { c ->
                 val iThread = c.getColumnIndexOrThrow(SmsCol.THREAD_ID)
@@ -133,9 +155,60 @@ class SmsRepository(private val context: Context) {
                 lastFromMe = a.lastFromMe,
                 lastFailed = a.lastType == SmsCol.TYPE_FAILED,
                 count = a.count,
+                category = categorize(a.address, r.name, a.snippet, a.threadId),
             )
         }
     }
+
+    // ---------------------------------------------------------------- instant-start cache
+    // The last conversation list is kept in the app's private storage so the screen
+    // appears immediately on launch while the full list refreshes in the background.
+
+    private val cacheFile get() = File(context.filesDir, "conversations.json")
+
+    fun saveCache(list: List<Conversation>) {
+        try {
+            val arr = JSONArray()
+            list.take(200).forEach { c ->
+                arr.put(
+                    JSONObject()
+                        .put("t", c.threadId).put("a", c.address).put("n", c.name ?: "")
+                        .put("p", c.photoUri ?: "").put("s", c.snippet.take(160)).put("d", c.date)
+                        .put("u", c.unread).put("m", c.lastFromMe).put("f", c.lastFailed)
+                        .put("c", c.count).put("g", c.category.name)
+                )
+            }
+            cacheFile.writeText(arr.toString())
+        } catch (_: Exception) {
+        }
+    }
+
+    fun loadCache(): List<Conversation> = try {
+        if (!cacheFile.exists()) emptyList()
+        else {
+            val arr = JSONArray(cacheFile.readText())
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                Conversation(
+                    threadId = o.getLong("t"),
+                    address = o.getString("a"),
+                    name = o.getString("n").ifEmpty { null },
+                    photoUri = o.getString("p").ifEmpty { null },
+                    snippet = o.getString("s"),
+                    date = o.getLong("d"),
+                    unread = o.getInt("u"),
+                    lastFromMe = o.getBoolean("m"),
+                    lastFailed = o.getBoolean("f"),
+                    count = o.getInt("c"),
+                    category = Category.values().firstOrNull { it.name == o.optString("g") } ?: Category.Personal,
+                )
+            }
+        }
+    } catch (_: Exception) {
+        emptyList()
+    }
+
+    // ---------------------------------------------------------------- messages
 
     private val fullProjection = arrayOf(
         SmsCol.ID, SmsCol.THREAD_ID, SmsCol.ADDRESS, SmsCol.BODY, SmsCol.DATE,
@@ -166,7 +239,7 @@ class SmsRepository(private val context: Context) {
         val iRead = getColumnIndexOrThrow(SmsCol.READ)
         val iStatus = getColumnIndex(SmsCol.STATUS)
         val iSub = getColumnIndex(SmsCol.SUB_ID)
-        while (moveToNext() && out.size < limit) {
+        while (out.size < limit && moveToNext()) {
             val type = getInt(iType)
             if (type == SmsCol.TYPE_DRAFT) continue
             out += Message(
@@ -184,10 +257,17 @@ class SmsRepository(private val context: Context) {
         return out
     }
 
-    fun loadMessages(threadId: Long): List<Message> {
-        if (!has(Manifest.permission.READ_SMS)) return emptyList()
-        return queryMessages("${SmsCol.THREAD_ID} = ?", arrayOf(threadId.toString()), "${SmsCol.DATE} ASC")
-            ?.use { it.toMessages() } ?: emptyList()
+    /** Newest [limit] messages of a thread, returned oldest-first. Second value: more exist. */
+    fun loadMessages(threadId: Long, limit: Int = PAGE): Pair<List<Message>, Boolean> {
+        if (!has(Manifest.permission.READ_SMS)) return emptyList<Message>() to false
+        var more = false
+        val list = queryMessages("${SmsCol.THREAD_ID} = ?", arrayOf(threadId.toString()), "${SmsCol.DATE} DESC")
+            ?.use { c ->
+                val l = c.toMessages(limit)
+                more = !c.isAfterLast && !c.isLast && l.size >= limit
+                l
+            } ?: emptyList()
+        return list.asReversed().toList() to more
     }
 
     fun unreadInThread(threadId: Long, limit: Int): List<Message> {
@@ -207,6 +287,29 @@ class SmsRepository(private val context: Context) {
         return messages.map {
             SearchHit(it.threadId, it.id, it.address, contacts.lookup(it.address).name, it.body, it.date)
         }
+    }
+
+    /** Reads every incoming SMS and extracts bank transactions. */
+    fun scanTransactions(): List<Transaction> {
+        if (!has(Manifest.permission.READ_SMS)) return emptyList()
+        val out = ArrayList<Transaction>()
+        try {
+            cr.query(
+                SMS_URI,
+                arrayOf(SmsCol.ID, SmsCol.THREAD_ID, SmsCol.ADDRESS, SmsCol.BODY, SmsCol.DATE),
+                "${SmsCol.TYPE} = ${SmsCol.TYPE_INBOX}", null, "${SmsCol.DATE} DESC"
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    val body = c.getString(3) ?: continue
+                    if (!BankParser.looksFinancial(body)) continue
+                    BankParser.parse(c.getLong(0), c.getLong(1), c.getString(2).orEmpty(), body, c.getLong(4))
+                        ?.let { out += it }
+                }
+            }
+        } catch (_: Exception) {
+        }
+        transactionThreads = out.mapTo(HashSet()) { it.threadId }
+        return out
     }
 
     fun headerFor(threadId: Long): ThreadHeader? {

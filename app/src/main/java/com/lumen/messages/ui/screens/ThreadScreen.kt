@@ -119,52 +119,16 @@ import com.lumen.messages.ui.glass.backdropSource
 import com.lumen.messages.ui.glass.rememberBackdropState
 import com.lumen.messages.ui.linkify
 import com.lumen.messages.ui.theme.LType
+import com.lumen.messages.ui.theme.LocalLook
 import com.lumen.messages.ui.theme.LocalPalette
+import com.lumen.messages.ui.ChatRow
+import com.lumen.messages.ui.DayRow
+import com.lumen.messages.ui.MsgRow
+import com.lumen.messages.data.BubbleShape
+import com.lumen.messages.data.BubbleStyle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalDate
-
-private sealed interface ChatRow {
-    val key: String
-}
-
-private data class DayRow(val day: LocalDate) : ChatRow {
-    override val key = "day-${day.toEpochDay()}"
-}
-
-private data class MsgRow(
-    val msg: Message,
-    val groupTop: Boolean,
-    val groupBottom: Boolean,
-    val otp: String?,
-) : ChatRow {
-    override val key = "m-${msg.id}"
-}
-
-private const val GROUP_GAP_MS = 3 * 60 * 1000L
-
-/** Builds rows newest-first (for a bottom-anchored list) with day separators and bubble grouping. */
-private fun buildRows(messages: List<Message>): List<ChatRow> {
-    val rows = ArrayList<ChatRow>(messages.size + 8)
-    var lastDay: LocalDate? = null
-    for (i in messages.indices) {
-        val m = messages[i]
-        val day = Fmt.localDate(m.date)
-        if (day != lastDay) {
-            rows += DayRow(day)
-            lastDay = day
-        }
-        val prev = messages.getOrNull(i - 1)
-        val next = messages.getOrNull(i + 1)
-        val top = prev == null || prev.isMine != m.isMine || m.date - prev.date > GROUP_GAP_MS ||
-            Fmt.localDate(prev.date) != day
-        val bottom = next == null || next.isMine != m.isMine || next.date - m.date > GROUP_GAP_MS ||
-            Fmt.localDate(next.date) != day
-        rows += MsgRow(m, top, bottom, if (m.isMine) null else findOtp(m.body))
-    }
-    rows.reverse()
-    return rows
-}
 
 private class SheetMemo {
     var message: Message? = null
@@ -204,7 +168,8 @@ fun ThreadScreen(
     }
 
     val messages = vm.messages
-    val rows = remember(messages) { buildRows(messages) }
+    val rows = vm.rows
+    val look = LocalLook.current
 
     // Messages already present when the thread opened don't animate; new ones pop in.
     val seen = remember(threadId) { SeenIds() }
@@ -215,6 +180,17 @@ fun ThreadScreen(
         if (newestId != null && listState.firstVisibleItemIndex <= 3) listState.animateScrollToItem(0)
     }
     val showJump by remember { derivedStateOf { listState.firstVisibleItemIndex > 4 } }
+
+    // Load older messages when the user scrolls near the top of what's loaded.
+    val nearOldest by remember {
+        derivedStateOf {
+            val last = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            last >= listState.layoutInfo.totalItemsCount - 12
+        }
+    }
+    LaunchedEffect(nearOldest, vm.hasOlder, rows.size) {
+        if (nearOldest && vm.hasOlder) vm.loadOlder()
+    }
 
     val screenHeightPx = with(density) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
     val maxBubble = (LocalConfiguration.current.screenWidthDp * 0.78f).dp
@@ -237,7 +213,7 @@ fun ThreadScreen(
                 when (row) {
                     is DayRow -> DayPill(Fmt.dayLabel(row.day), Modifier.animateItem())
                     is MsgRow -> {
-                        val animateIn = remember(row.msg.id) { seen.ids?.add(row.msg.id) == true }
+                        val animateIn = remember(row.msg.id) { seen.ids?.add(row.msg.id) == true && !look.reduceMotion }
                         MessageBubble(
                             row = row,
                             animateIn = animateIn,
@@ -425,10 +401,14 @@ private fun MessageBubble(
 ) {
     val p = LocalPalette.current
     val context = LocalContext.current
+    val look = LocalLook.current
     val m = row.msg
     val mine = m.isMine
-    val big = 22.dp
-    val small = 6.dp
+    val big = if (look.bubbleShape == BubbleShape.Round) 22.dp else 12.dp
+    val small = if (look.bubbleShape == BubbleShape.Round) 6.dp else 4.dp
+    // Glass style draws sent bubbles as tinted glass with normal text colour.
+    val glassMine = mine && look.bubbleStyle == BubbleStyle.Glass && !m.isFailed
+    val onBubble = if (mine && !glassMine) p.onAccent else p.text
     val shape = if (mine) {
         RoundedCornerShape(
             topStart = big, topEnd = if (row.groupTop) big else small,
@@ -446,7 +426,7 @@ private fun MessageBubble(
         if (appear.value < 1f) appear.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = 320f))
     }
     var yInWindow by remember { mutableFloatStateOf(0f) }
-    val text = remember(m.body, mine) { linkify(m.body, if (mine) Color.White else p.accentB) }
+    val text = remember(m.body, onBubble) { linkify(m.body, if (mine && !glassMine) Color.White else p.accentA) }
     val interaction = remember { MutableInteractionSource() }
 
     Column(
@@ -470,11 +450,17 @@ private fun MessageBubble(
                 .onGloballyPositioned { if (mine) yInWindow = it.positionInWindow().y }
                 .clip(shape)
                 .then(
-                    if (mine) {
+                    if (glassMine) {
+                        Modifier
+                            .background(p.accentA.copy(alpha = if (p.dark) 0.26f else 0.16f))
+                            .border(1.dp, Brush.linearGradient(listOf(p.accentB.copy(alpha = 0.6f), p.glassEdgeDark)), shape)
+                    } else if (mine && look.bubbleStyle == BubbleStyle.Solid) {
+                        Modifier.background(if (m.isFailed) p.danger else p.accentA)
+                    } else if (mine) {
                         Modifier.drawBehind {
                             // Gradient pinned to the screen, so bubbles shift colour as they scroll.
                             val colors = if (m.isFailed) listOf(p.danger, p.danger.copy(alpha = 0.8f))
-                            else listOf(p.accentC, p.accentA, p.accentB)
+                            else listOf(p.accentB, p.accentA, p.accentC)
                             drawRect(
                                 Brush.verticalGradient(colors, startY = -yInWindow, endY = screenHeightPx - yInWindow)
                             )
@@ -491,13 +477,13 @@ private fun MessageBubble(
                 )
                 .combinedClickable(
                     interactionSource = interaction,
-                    indication = ripple(color = if (mine) Color.White else p.text),
+                    indication = ripple(color = onBubble),
                     onLongClick = onLongPress,
                     onClick = { if (m.isFailed) onRetry() },
                 )
                 .padding(horizontal = 14.dp, vertical = 9.dp),
         ) {
-            Text(text, style = LType.body.copy(color = if (mine) p.onAccent else p.text))
+            Text(text, style = LType.body.copy(color = onBubble))
         }
 
         if (row.otp != null) {

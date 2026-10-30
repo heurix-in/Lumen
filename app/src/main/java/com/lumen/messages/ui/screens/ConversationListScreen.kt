@@ -53,6 +53,13 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.border
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.rounded.AccountBalanceWallet
+import androidx.compose.material.icons.rounded.Settings
+import com.lumen.messages.ui.ListFilter
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -148,9 +155,9 @@ fun ConversationListScreen(
         }
     }
 
-    val visible = remember(vm.conversations, vm.query, vm.unreadOnly) {
+    val visible = remember(vm.conversations, vm.query, vm.filter, vm.prefs.smartTabs) {
         vm.conversations.filter { c ->
-            (!vm.unreadOnly || c.unread > 0) &&
+            (!vm.prefs.smartTabs && vm.filter != ListFilter.Unread || vm.matchesFilter(c)) &&
                 (vm.query.isBlank() ||
                     c.title.contains(vm.query, true) ||
                     c.address.contains(vm.query, true))
@@ -158,14 +165,6 @@ fun ConversationListScreen(
     }
     val hits = if (vm.query.isNotBlank()) vm.searchHits else emptyList()
 
-    // Entrance stagger only on the first appearance of the session.
-    val playIntro = remember { !vm.listIntroPlayed }
-    LaunchedEffect(vm.conversationsLoaded) {
-        if (vm.conversationsLoaded) {
-            delay(900)
-            vm.listIntroPlayed = true
-        }
-    }
 
     val collapse by remember {
         derivedStateOf {
@@ -195,13 +194,18 @@ fun ConversationListScreen(
                     DefaultAppBanner(onRequestDefault, Modifier.animateItem())
                 }
             }
+            if (vm.filter == ListFilter.Transactions && vm.query.isBlank() && vm.transactions.isNotEmpty()) {
+                item(key = "money-teaser") {
+                    MoneyTeaser(vm, Modifier.animateItem())
+                }
+            }
             itemsIndexed(visible, key = { _, c -> c.threadId }, contentType = { _, _ -> "conv" }) { index, conv ->
                 ConversationCard(
                     conv = conv,
                     query = vm.query,
                     selected = conv.threadId in vm.selection,
                     selectionMode = vm.selection.isNotEmpty(),
-                    entranceDelayIndex = if (playIntro && !vm.listIntroPlayed) index else -1,
+                    entranceDelayIndex = -1,
                     sharedScope = sharedScope,
                     animScope = animScope,
                     onClick = {
@@ -245,12 +249,12 @@ fun ConversationListScreen(
             EmptyState(
                 title = when {
                     vm.query.isNotBlank() -> "No matches"
-                    vm.unreadOnly -> "All caught up"
+                    vm.filter == ListFilter.Unread -> "All caught up"
                     else -> "No conversations yet"
                 },
                 subtitle = when {
                     vm.query.isNotBlank() -> "Nothing found for “${vm.query}”"
-                    vm.unreadOnly -> "You've read everything."
+                    vm.filter != ListFilter.All -> "Nothing in ${vm.filter.label} yet."
                     else -> "Tap New chat to send your first message."
                 },
             )
@@ -292,7 +296,11 @@ fun ConversationListScreen(
                                             transformOrigin = TransformOrigin(0f, 0.5f)
                                         },
                                 )
-                                GlassIconButton(Icons.Rounded.Search, "Search", onClick = { searchOpen = true })
+                                GlassIconButton(Icons.Rounded.AccountBalanceWallet, "Money", onClick = vm::openMoney, size = 40.dp)
+                                Spacer(Modifier.width(8.dp))
+                                GlassIconButton(Icons.Rounded.Search, "Search", onClick = { searchOpen = true }, size = 40.dp)
+                                Spacer(Modifier.width(8.dp))
+                                GlassIconButton(Icons.Rounded.Settings, "Settings", onClick = vm::openSettings, size = 40.dp)
                             }
                             HeaderMode.Search -> SearchField(
                                 query = vm.query,
@@ -329,12 +337,13 @@ fun ConversationListScreen(
                     }
                 }
                 Spacer(Modifier.height(10.dp))
-                FilterTabs(
-                    unreadOnly = vm.unreadOnly,
-                    unreadCount = vm.conversations.count { it.unread > 0 },
-                    onChange = {
+                FilterChips(
+                    filters = if (vm.prefs.smartTabs) ListFilter.values().toList() else listOf(ListFilter.All, ListFilter.Unread),
+                    selected = vm.filter,
+                    countFor = vm::countFor,
+                    onSelect = {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        vm.unreadOnly = it
+                        vm.filter = it
                     },
                 )
             }
@@ -420,47 +429,58 @@ private fun SearchField(query: String, onQuery: (String) -> Unit, onClose: () ->
 }
 
 @Composable
-private fun FilterTabs(unreadOnly: Boolean, unreadCount: Int, onChange: (Boolean) -> Unit) {
+private fun FilterChips(
+    filters: List<ListFilter>,
+    selected: ListFilter,
+    countFor: (ListFilter) -> Int,
+    onSelect: (ListFilter) -> Unit,
+) {
     val p = LocalPalette.current
-    GlassSurface(
-        modifier = Modifier.fillMaxWidth().height(40.dp),
-        shape = RoundedCornerShape(20.dp),
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
     ) {
-        BoxWithConstraints(Modifier.fillMaxSize().padding(4.dp)) {
-            val half = maxWidth / 2
-            val offset by animateDpAsState(
-                targetValue = if (unreadOnly) half else 0.dp,
-                animationSpec = spring(dampingRatio = 0.72f, stiffness = 520f),
-                label = "tab",
+        items(filters, key = { it.name }) { f ->
+            val active = f == selected
+            val fill by animateColorAsState(
+                if (active) p.accentA else p.glassTint,
+                animationSpec = spring(stiffness = 600f),
+                label = "chip",
             )
+            val scale by animateFloatAsState(if (active) 1f else 0.96f, spring(0.5f, 600f), label = "chipScale")
+            val count = countFor(f)
             Box(
                 Modifier
-                    .offset(x = offset)
-                    .width(half)
-                    .fillMaxSize()
-                    .shadow(8.dp, RoundedCornerShape(16.dp), ambientColor = p.accentA, spotColor = p.accentA)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(p.accentBrush)
-            )
-            Row(Modifier.fillMaxSize()) {
-                listOf(false, true).forEach { tabUnread ->
-                    val active = tabUnread == unreadOnly
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(16.dp))
-                            .clickable { onChange(tabUnread) },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        val label = if (tabUnread) (if (unreadCount > 0) "Unread · $unreadCount" else "Unread") else "All"
-                        Text(
-                            label,
-                            style = LType.button.copy(
-                                color = if (active) p.onAccent else p.textDim,
-                                fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-                            ),
-                        )
+                    .graphicsLayer { scaleX = scale; scaleY = scale }
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(fill)
+                    .border(1.dp, if (active) Color.Transparent else p.glassEdgeLight, RoundedCornerShape(18.dp))
+                    .clickable { onSelect(f) }
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        f.label,
+                        style = LType.button.copy(
+                            fontSize = 14.sp,
+                            color = if (active) p.onAccent else p.text,
+                            fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                        ),
+                    )
+                    if (count > 0) {
+                        Spacer(Modifier.width(6.dp))
+                        Box(
+                            Modifier
+                                .clip(CircleShape)
+                                .background(if (active) Color.White.copy(alpha = 0.25f) else p.accentA)
+                                .padding(horizontal = 6.dp, vertical = 1.dp)
+                        ) {
+                            Text(
+                                if (count > 99) "99+" else "$count",
+                                style = LType.micro.copy(color = Color.White, fontWeight = FontWeight.Bold),
+                            )
+                        }
                     }
                 }
             }

@@ -2,6 +2,7 @@ package com.lumen.messages
 
 import android.app.Application
 import android.content.Context
+import com.lumen.messages.data.Prefs
 import com.lumen.messages.data.SmsRepository
 import com.lumen.messages.notify.Notifier
 import kotlinx.coroutines.CoroutineScope
@@ -13,6 +14,7 @@ class LumenApp : Application() {
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     val repository: SmsRepository by lazy { SmsRepository(this) }
+    val prefs: Prefs by lazy { Prefs(this) }
 
     override fun onCreate() {
         super.onCreate()

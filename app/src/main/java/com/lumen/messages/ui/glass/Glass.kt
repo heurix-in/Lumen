@@ -30,6 +30,7 @@ import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.lumen.messages.ui.theme.LocalLook
 import com.lumen.messages.ui.theme.LocalPalette
 
 /** Real backdrop blur needs Android 12+. Older phones get a denser frosted tint instead. */
@@ -78,7 +79,7 @@ fun GlassSurface(
     val blurLayer = if (backdrop != null && CanBlur) rememberGraphicsLayer() else null
     var selfOrigin by remember { mutableStateOf(Offset.Zero) }
     val useBlur = backdrop != null && CanBlur
-    val blurPx = with(LocalDensity.current) { blur.toPx() }
+    val blurPx = with(LocalDensity.current) { blur.toPx() } * LocalLook.current.blur.scale
     val fill = if (backdrop != null && !CanBlur) {
         tint.copy(alpha = (tint.alpha + 0.38f).coerceAtMost(0.95f))
     } else tint

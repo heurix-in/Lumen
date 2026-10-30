@@ -6,16 +6,20 @@ import android.app.role.RoleManager
 import android.content.Context
 import android.os.Build
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.lumen.messages.data.Category
 import com.lumen.messages.data.ContactEntry
 import com.lumen.messages.data.Conversation
 import com.lumen.messages.data.Message
 import com.lumen.messages.data.SearchHit
 import com.lumen.messages.data.SimInfo
+import com.lumen.messages.data.SmsRepository
 import com.lumen.messages.data.ThreadHeader
+import com.lumen.messages.data.Transaction
 import com.lumen.messages.lumen
 import com.lumen.messages.notify.Notifier
 import com.lumen.messages.sms.SmsSender
@@ -25,6 +29,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.YearMonth
 
 sealed interface Screen {
     val depth: Int
@@ -33,30 +38,63 @@ sealed interface Screen {
         override val depth = 0
     }
 
-    data class Thread(val threadId: Long) : Screen {
-        override val depth = 2
-    }
-
     data class NewMessage(val nonce: Long = System.nanoTime()) : Screen {
         override val depth = 1
     }
+
+    data object Money : Screen {
+        override val depth = 1
+    }
+
+    data object Settings : Screen {
+        override val depth = 1
+    }
+
+    data class Thread(val threadId: Long) : Screen {
+        override val depth = 2
+    }
 }
+
+/** Tabs above the conversation list. */
+enum class ListFilter(val label: String) {
+    All("All"),
+    Unread("Unread"),
+    Personal("Personal"),
+    Transactions("Transactions"),
+    Otp("OTPs"),
+    Updates("Updates"),
+}
+
+enum class MoneyGrouping(val label: String) { Date("By date"), Party("By payee"), Account("By account") }
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repo = app.lumen.repository
-    private val prefs = app.getSharedPreferences("lumen", Context.MODE_PRIVATE)
+    val prefs = app.lumen.prefs
+    private val sp = app.getSharedPreferences("lumen", Context.MODE_PRIVATE)
+
+    // ------------------------------------------------------------ navigation (simple back stack)
+    private val stack = mutableStateListOf<Screen>(Screen.List)
+    val screen: Screen get() = stack.last()
+
+    private fun push(s: Screen) {
+        val top = stack.last()
+        when {
+            top == s -> Unit
+            top is Screen.Thread && s is Screen.Thread -> stack[stack.lastIndex] = s
+            top is Screen.NewMessage && s is Screen.Thread -> stack[stack.lastIndex] = s
+            else -> stack.add(s)
+        }
+    }
 
     // ------------------------------------------------------------ app state
-    var screen by mutableStateOf<Screen>(Screen.List)
-        private set
     var isDefaultSms by mutableStateOf(false)
         private set
     var hasSmsAccess by mutableStateOf(false)
         private set
     var hasContacts by mutableStateOf(false)
         private set
-    var onboarded by mutableStateOf(prefs.getBoolean("onboarded", false))
+    var onboarded by mutableStateOf(sp.getBoolean("onboarded", false))
         private set
 
     // ------------------------------------------------------------ list
@@ -66,22 +104,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var query by mutableStateOf("")
         private set
-    var unreadOnly by mutableStateOf(false)
+    var filter by mutableStateOf(ListFilter.All)
     var searchHits by mutableStateOf<List<SearchHit>>(emptyList())
         private set
     var selection by mutableStateOf<Set<Long>>(emptySet())
         private set
-
-    /** The staggered list entrance only plays on the first launch of the session. */
-    var listIntroPlayed = false
 
     // ------------------------------------------------------------ thread
     var header by mutableStateOf<ThreadHeader?>(null)
         private set
     var messages by mutableStateOf<List<Message>>(emptyList())
         private set
+    var rows by mutableStateOf<List<ChatRow>>(emptyList())
+        private set
     var messagesLoaded by mutableStateOf(false)
         private set
+    var hasOlder by mutableStateOf(false)
+        private set
+    private var messageLimit = SmsRepository.PAGE
+    private var loadingOlder = false
     var draft by mutableStateOf("")
     var sims by mutableStateOf<List<SimInfo>>(emptyList())
         private set
@@ -92,11 +133,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var pendingBody: String? = null
 
+    // ------------------------------------------------------------ money
+    var transactions by mutableStateOf<List<Transaction>>(emptyList())
+        private set
+    var transactionsLoaded by mutableStateOf(false)
+        private set
+    var moneyMonth by mutableStateOf(YearMonth.now())
+    var moneyAccount by mutableStateOf<String?>(null)
+    var moneyGrouping by mutableStateOf(MoneyGrouping.Date)
+
     private val drafts = HashMap<Long, String>()
     private var observeJob: Job? = null
     private var searchJob: Job? = null
+    private var txJob: Job? = null
 
     init {
+        // Show the last known list instantly, then refresh.
+        viewModelScope.launch {
+            val cached = withContext(Dispatchers.IO) { repo.loadCache() }
+            if (!conversationsLoaded && cached.isNotEmpty()) conversations = cached
+        }
         refreshState()
     }
 
@@ -111,7 +167,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             repo.contacts.invalidate()
             if (observeJob != null) restartObserving()
         }
-        if (hasSmsAccess && observeJob == null) startObserving()
+        if (hasSmsAccess && observeJob == null) {
+            startObserving()
+            loadTransactions()
+        }
         viewModelScope.launch(Dispatchers.IO) {
             val list = repo.sims()
             val def = repo.defaultSmsSubId()
@@ -135,13 +194,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun finishOnboarding() {
         onboarded = true
-        prefs.edit().putBoolean("onboarded", true).apply()
+        sp.edit().putBoolean("onboarded", true).apply()
     }
 
     private fun startObserving() {
         observeJob = viewModelScope.launch {
             repo.observe().collectLatest {
-                delay(120) // coalesce bursts (e.g. multipart sends) into one refresh
+                delay(200) // coalesce bursts (multipart sends, mark-read) into one refresh
                 reload()
             }
         }
@@ -154,39 +213,57 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun reload() {
-        val openThread = (screen as? Screen.Thread)?.threadId
-        val (list, msgs) = withContext(Dispatchers.IO) {
-            repo.loadConversations() to openThread?.let { repo.loadMessages(it) }
-        }
+        val list = withContext(Dispatchers.IO) { repo.loadConversations() }
         conversations = list
         conversationsLoaded = true
-        if (openThread != null && msgs != null && (screen as? Screen.Thread)?.threadId == openThread) {
-            messages = msgs
-            messagesLoaded = true
-            if (msgs.any { !it.isMine && !it.read }) {
-                withContext(Dispatchers.IO) { repo.markRead(openThread) }
+        viewModelScope.launch(Dispatchers.IO) { repo.saveCache(list) }
+        val open = (screen as? Screen.Thread)?.threadId
+        if (open != null) loadThread(open, markRead = true)
+        if (query.isNotBlank()) runSearch(query, immediate = true)
+    }
+
+    private suspend fun loadThread(threadId: Long, markRead: Boolean) {
+        val (msgs, more) = withContext(Dispatchers.IO) { repo.loadMessages(threadId, messageLimit) }
+        val built = withContext(Dispatchers.Default) { buildRows(msgs) }
+        if ((screen as? Screen.Thread)?.threadId != threadId) return
+        messages = msgs
+        rows = built
+        hasOlder = more
+        messagesLoaded = true
+        if (markRead && msgs.any { !it.isMine && !it.read }) {
+            withContext(Dispatchers.IO) {
+                repo.markRead(threadId)
+                Notifier.cancel(getApplication(), threadId)
             }
         }
-        if (query.isNotBlank()) runSearch(query, immediate = true)
+    }
+
+    fun loadOlder() {
+        val tid = (screen as? Screen.Thread)?.threadId ?: return
+        if (!hasOlder || loadingOlder) return
+        loadingOlder = true
+        messageLimit += SmsRepository.PAGE
+        viewModelScope.launch {
+            loadThread(tid, markRead = false)
+            loadingOlder = false
+        }
     }
 
     // ------------------------------------------------------------ navigation
 
     fun back(): Boolean {
-        return when {
-            selection.isNotEmpty() -> {
-                selection = emptySet(); true
-            }
-            screen is Screen.Thread || screen is Screen.NewMessage -> {
-                saveDraft()
-                screen = Screen.List
-                true
-            }
-            query.isNotEmpty() -> {
-                onQuery(""); true
-            }
-            else -> false
+        if (selection.isNotEmpty()) {
+            selection = emptySet(); return true
         }
+        if (stack.size > 1) {
+            if (screen is Screen.Thread) saveDraft()
+            stack.removeAt(stack.lastIndex)
+            return true
+        }
+        if (query.isNotEmpty()) {
+            onQuery(""); return true
+        }
+        return false
     }
 
     private fun saveDraft() {
@@ -194,11 +271,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (draft.isNotBlank()) drafts[h.threadId] = draft else drafts.remove(h.threadId)
     }
 
+    fun openMoney() {
+        selection = emptySet()
+        push(Screen.Money)
+        if (!transactionsLoaded) loadTransactions()
+    }
+
+    fun openSettings() {
+        selection = emptySet()
+        push(Screen.Settings)
+    }
+
     fun openConversation(c: Conversation) {
         openThread(ThreadHeader(c.threadId, c.address, c.name, c.photoUri))
     }
 
-    fun openThreadById(threadId: Long) {
+    fun openThreadById(threadId: Long, fromNotification: Boolean = false) {
+        if (fromNotification) {
+            while (stack.size > 1) stack.removeAt(stack.lastIndex)
+        }
         val known = conversations.firstOrNull { it.threadId == threadId }
         if (known != null) {
             openConversation(known)
@@ -211,29 +302,29 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun openThread(h: ThreadHeader) {
-        if ((screen as? Screen.Thread)?.threadId != h.threadId) {
-            saveDraft()
+        val current = (screen as? Screen.Thread)?.threadId
+        if (current != h.threadId) {
+            if (current != null) saveDraft()
             messages = emptyList()
+            rows = emptyList()
             messagesLoaded = false
+            hasOlder = false
+            messageLimit = SmsRepository.PAGE
         }
         header = h
         draft = pendingBody ?: drafts[h.threadId] ?: ""
         pendingBody = null
         selection = emptySet()
-        screen = Screen.Thread(h.threadId)
+        push(Screen.Thread(h.threadId))
         viewModelScope.launch {
-            val msgs = withContext(Dispatchers.IO) {
+            loadThread(h.threadId, markRead = true)
+            withContext(Dispatchers.IO) {
                 repo.markRead(h.threadId)
                 Notifier.cancel(getApplication(), h.threadId)
-                repo.loadMessages(h.threadId)
             }
-            if ((screen as? Screen.Thread)?.threadId == h.threadId) {
-                messages = msgs
-                messagesLoaded = true
-                // Prefer the SIM this conversation last used.
-                msgs.lastOrNull { it.subId >= 0 }?.subId?.let { sub ->
-                    if (sims.any { it.subId == sub }) selectedSubId = sub
-                }
+            // Prefer the SIM this conversation last used.
+            messages.lastOrNull { it.subId >= 0 }?.subId?.let { sub ->
+                if (sims.any { it.subId == sub }) selectedSubId = sub
             }
         }
     }
@@ -241,7 +332,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun openNewMessage(prefillBody: String? = null) {
         pendingBody = prefillBody
         selection = emptySet()
-        screen = Screen.NewMessage()
+        push(Screen.NewMessage())
         loadContacts()
     }
 
@@ -282,6 +373,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             if (!immediate) delay(220)
             searchHits = withContext(Dispatchers.IO) { repo.search(q.trim()) }
         }
+    }
+
+    fun matchesFilter(c: Conversation): Boolean = when (filter) {
+        ListFilter.All -> true
+        ListFilter.Unread -> c.unread > 0
+        ListFilter.Personal -> c.category == Category.Personal
+        ListFilter.Transactions -> c.category == Category.Transactions
+        ListFilter.Otp -> c.category == Category.Otp
+        ListFilter.Updates -> c.category == Category.Updates
+    }
+
+    fun countFor(f: ListFilter): Int = when (f) {
+        ListFilter.All -> 0
+        ListFilter.Unread -> conversations.count { it.unread > 0 }
+        ListFilter.Personal -> conversations.count { it.category == Category.Personal && it.unread > 0 }
+        ListFilter.Transactions -> conversations.count { it.category == Category.Transactions && it.unread > 0 }
+        ListFilter.Otp -> conversations.count { it.category == Category.Otp && it.unread > 0 }
+        ListFilter.Updates -> conversations.count { it.category == Category.Updates && it.unread > 0 }
     }
 
     fun toggleSelect(threadId: Long) {
@@ -334,6 +443,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun deleteMessage(m: Message) {
         messages = messages.filterNot { it.id == m.id }
+        rows = rows.filterNot { it is MsgRow && it.msg.id == m.id }
         viewModelScope.launch(Dispatchers.IO) { repo.deleteMessage(m.id) }
     }
 
@@ -341,5 +451,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (sims.size < 2) return
         val i = sims.indexOfFirst { it.subId == selectedSubId }
         selectedSubId = sims[(i + 1).mod(sims.size)].subId
+    }
+
+    // ------------------------------------------------------------ money
+
+    fun loadTransactions() {
+        if (txJob?.isActive == true) return
+        txJob = viewModelScope.launch {
+            val list = withContext(Dispatchers.IO) { repo.scanTransactions() }
+            transactions = list
+            transactionsLoaded = true
+            if (list.isNotEmpty() && list.none { YearMonth.from(Fmt.localDate(it.date)) == moneyMonth }) {
+                moneyMonth = YearMonth.from(Fmt.localDate(list.first().date))
+            }
+            // Re-categorise now that transaction threads are known.
+            if (conversationsLoaded) {
+                conversations = withContext(Dispatchers.IO) { repo.loadConversations() }
+            }
+        }
     }
 }

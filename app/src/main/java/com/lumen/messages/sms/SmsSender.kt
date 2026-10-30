@@ -58,10 +58,11 @@ object SmsSender {
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
                 )
             }
+            val reports = context.lumen.prefs.deliveryReports
             if (parts.size <= 1) {
-                sms.sendTextMessage(address, null, body, sent.firstOrNull(), delivered.firstOrNull())
+                sms.sendTextMessage(address, null, body, sent.firstOrNull(), if (reports) delivered.firstOrNull() else null)
             } else {
-                sms.sendMultipartTextMessage(address, null, parts, sent, delivered)
+                sms.sendMultipartTextMessage(address, null, parts, sent, if (reports) delivered else null)
             }
             true
         } catch (e: Exception) {

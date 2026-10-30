@@ -36,6 +36,8 @@ class SmsReceiver : BroadcastReceiver() {
                 val threadId = uri?.let { app.repository.threadOf(it) } ?: -1L
                 if (threadId > 0 && threadId != Foreground.visibleThread) {
                     Notifier.showThread(app, threadId)
+                } else if (threadId > 0) {
+                    Notifier.inChatAlert(app)
                 }
             } finally {
                 pending.finish()

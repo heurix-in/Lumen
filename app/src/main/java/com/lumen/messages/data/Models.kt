@@ -27,6 +27,14 @@ object SmsCol {
     const val STATUS_FAILED = 64
 }
 
+/** Smart grouping of conversations. */
+enum class Category(val label: String) {
+    Personal("Personal"),
+    Transactions("Transactions"),
+    Otp("OTPs"),
+    Updates("Updates"),
+}
+
 data class Conversation(
     val threadId: Long,
     val address: String,
@@ -38,6 +46,7 @@ data class Conversation(
     val lastFromMe: Boolean,
     val lastFailed: Boolean,
     val count: Int,
+    val category: Category = Category.Personal,
 ) {
     val title: String get() = name ?: address.ifBlank { "Unknown" }
 }

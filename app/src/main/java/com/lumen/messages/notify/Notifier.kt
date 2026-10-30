@@ -8,6 +8,9 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.RingtoneManager
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -16,6 +19,7 @@ import androidx.core.app.RemoteInput
 import androidx.core.content.ContextCompat
 import com.lumen.messages.R
 import com.lumen.messages.lumen
+import com.lumen.messages.ui.findOtp
 import com.lumen.messages.ui.MainActivity
 
 /** Tracks which conversation is on screen so we don't notify for it. */
@@ -30,6 +34,7 @@ object Notifier {
     const val KEY_REPLY = "reply_text"
     const val EXTRA_THREAD = "thread_id"
     const val EXTRA_ADDRESS = "address"
+    const val EXTRA_CODE = "code"
     private const val MMS_NOTIFICATION_ID = 0x4D4D53
 
     fun ensureChannel(context: Context) {
@@ -67,16 +72,20 @@ object Notifier {
             cancel(context, threadId)
             return
         }
+        val prefs = context.lumen.prefs
         val address = unread.last().address
         val contact = repo.contacts.lookup(address)
+        val displayName = if (prefs.notifShowContact) (contact.name ?: address) else "New message"
         val sender = Person.Builder()
-            .setName(contact.name ?: address)
+            .setName(displayName)
             .setKey(address)
             .setImportant(contact.name != null)
             .build()
         val me = Person.Builder().setName("You").build()
         val style = NotificationCompat.MessagingStyle(me)
-        unread.forEach { style.addMessage(it.body, it.date, sender) }
+        unread.forEach {
+            style.addMessage(if (prefs.notifShowText) it.body else "New message", it.date, sender)
+        }
 
         val id = threadId.toInt()
         val open = PendingIntent.getActivity(
@@ -87,40 +96,12 @@ object Notifier {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val replyIntent = PendingIntent.getBroadcast(
-            context, id,
-            Intent(context, NotificationActionReceiver::class.java)
-                .setAction(NotificationActionReceiver.ACTION_REPLY)
-                .putExtra(EXTRA_THREAD, threadId)
-                .putExtra(EXTRA_ADDRESS, address),
-            mutableFlag or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-        val remoteInput = RemoteInput.Builder(KEY_REPLY).setLabel("Reply").build()
-        val replyAction = NotificationCompat.Action.Builder(R.drawable.ic_reply, "Reply", replyIntent)
-            .addRemoteInput(remoteInput)
-            .setAllowGeneratedReplies(true)
-            .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
-            .setShowsUserInterface(false)
-            .build()
-
-        val readIntent = PendingIntent.getBroadcast(
-            context, id,
-            Intent(context, NotificationActionReceiver::class.java)
-                .setAction(NotificationActionReceiver.ACTION_MARK_READ)
-                .putExtra(EXTRA_THREAD, threadId),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-        val readAction = NotificationCompat.Action.Builder(R.drawable.ic_done, "Mark as read", readIntent)
-            .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ)
-            .setShowsUserInterface(false)
-            .build()
-
-        val notification = NotificationCompat.Builder(context, CHANNEL)
+        val builder = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_message)
-            .setColor(0xFF7C5CFF.toInt())
+            .setColor(prefs.accent.toInt())
             .setStyle(style)
-            .setContentTitle(contact.name ?: address)
-            .setContentText(unread.last().body)
+            .setContentTitle(displayName)
+            .setContentText(if (prefs.notifShowText) unread.last().body else "New message")
             .setWhen(unread.last().date)
             .setShowWhen(true)
             .setNumber(unread.size)
@@ -128,10 +109,60 @@ object Notifier {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(open)
             .setAutoCancel(true)
-            .setOnlyAlertOnce(false)
-            .addAction(replyAction)
-            .addAction(readAction)
-            .build()
+
+        val code = findOtp(unread.last().body)
+        if (code != null && prefs.notifCopyCode) {
+            val copyIntent = PendingIntent.getBroadcast(
+                context, id,
+                Intent(context, NotificationActionReceiver::class.java)
+                    .setAction(NotificationActionReceiver.ACTION_COPY)
+                    .putExtra(EXTRA_THREAD, threadId)
+                    .putExtra(EXTRA_CODE, code),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            builder.addAction(
+                NotificationCompat.Action.Builder(R.drawable.ic_done, "Copy $code", copyIntent)
+                    .setShowsUserInterface(false)
+                    .build()
+            )
+        }
+
+        if (prefs.notifReply) {
+            val replyIntent = PendingIntent.getBroadcast(
+                context, id,
+                Intent(context, NotificationActionReceiver::class.java)
+                    .setAction(NotificationActionReceiver.ACTION_REPLY)
+                    .putExtra(EXTRA_THREAD, threadId)
+                    .putExtra(EXTRA_ADDRESS, address),
+                mutableFlag or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            val remoteInput = RemoteInput.Builder(KEY_REPLY).setLabel("Reply").build()
+            builder.addAction(
+                NotificationCompat.Action.Builder(R.drawable.ic_reply, "Reply", replyIntent)
+                    .addRemoteInput(remoteInput)
+                    .setAllowGeneratedReplies(true)
+                    .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
+                    .setShowsUserInterface(false)
+                    .build()
+            )
+        }
+
+        if (prefs.notifMarkRead) {
+            val readIntent = PendingIntent.getBroadcast(
+                context, id,
+                Intent(context, NotificationActionReceiver::class.java)
+                    .setAction(NotificationActionReceiver.ACTION_MARK_READ)
+                    .putExtra(EXTRA_THREAD, threadId),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+            builder.addAction(
+                NotificationCompat.Action.Builder(R.drawable.ic_done, "Mark as read", readIntent)
+                    .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ)
+                    .setShowsUserInterface(false)
+                    .build()
+            )
+        }
+        val notification = builder.build()
 
         try {
             NotificationManagerCompat.from(context).notify(id, notification)
@@ -158,6 +189,24 @@ object Notifier {
         try {
             NotificationManagerCompat.from(context).notify(MMS_NOTIFICATION_ID, notification)
         } catch (_: SecurityException) {
+        }
+    }
+
+    /** Soft sound / buzz when a message arrives in the conversation that is open on screen. */
+    fun inChatAlert(context: Context) {
+        val prefs = context.lumen.prefs
+        if (prefs.inChatSound) {
+            runCatching {
+                RingtoneManager.getRingtone(
+                    context, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                )?.play()
+            }
+        }
+        if (prefs.inChatVibrate) {
+            runCatching {
+                context.getSystemService(Vibrator::class.java)
+                    ?.vibrate(VibrationEffect.createOneShot(40, VibrationEffect.DEFAULT_AMPLITUDE))
+            }
         }
     }
 

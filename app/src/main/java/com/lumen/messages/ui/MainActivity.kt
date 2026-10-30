@@ -12,6 +12,13 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.SystemBarStyle
+import android.graphics.Color as AndroidColor
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.DisposableEffect
+import com.lumen.messages.data.ThemeMode
+import com.lumen.messages.ui.screens.MoneyScreen
+import com.lumen.messages.ui.screens.SettingsScreen
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
@@ -50,7 +57,20 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) handleIntent(intent)
         setContent {
-            LumenTheme {
+            val systemDark = isSystemInDarkTheme()
+            val dark = when (vm.prefs.themeMode) {
+                ThemeMode.System -> systemDark
+                ThemeMode.Light -> false
+                ThemeMode.Dark -> true
+            }
+            // Status-bar icons must contrast with the chosen screen colour, not the system one.
+            DisposableEffect(dark) {
+                val style = if (dark) SystemBarStyle.dark(AndroidColor.TRANSPARENT)
+                else SystemBarStyle.light(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT)
+                enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+                onDispose { }
+            }
+            LumenTheme(vm.prefs, dark) {
                 LumenRoot(vm)
             }
         }
@@ -72,7 +92,7 @@ class MainActivity : ComponentActivity() {
         intent ?: return
         val threadId = intent.getLongExtra(Notifier.EXTRA_THREAD, -1L)
         if (threadId > 0) {
-            vm.openThreadById(threadId)
+            vm.openThreadById(threadId, fromNotification = true)
             return
         }
         when (intent.action) {
@@ -187,6 +207,8 @@ private fun MainScreens(vm: AppViewModel, requestDefault: () -> Unit, requestCon
                     animScope = this@AnimatedContent,
                 )
                 is Screen.NewMessage -> NewMessageScreen(vm, onRequestContacts = requestContacts)
+                Screen.Money -> MoneyScreen(vm)
+                Screen.Settings -> SettingsScreen(vm, onRequestDefault = requestDefault)
             }
         }
     }
